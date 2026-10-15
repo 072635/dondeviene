@@ -50,7 +50,7 @@ Las unidades simuladas se apagan desde el Tablero, en la casilla "Unidades de de
 La forma más simple es **Render** (render.com):
 
 1. Sube este proyecto a un repositorio de GitHub.
-2. En Render elige **New → Blueprint** y selecciona el repositorio. El archivo `render.yaml` ya trae todo configurado, incluido un disco para que la base de datos no se borre.
+2. En Render elige **New → Blueprint** y selecciona el repositorio. El archivo `render.yaml` usa el **plan gratis**: sirve para probar, pero la app se duerme tras 15 minutos sin uso y los datos se borran al reiniciar. Para operar con conductores reales cambia a `plan: starter` y activa el disco que está comentado en ese archivo.
 3. Escribe la `ADMIN_PASSWORD` cuando Render te la pida.
 4. Render te da una dirección con HTTPS, por ejemplo `https://dondeviene.onrender.com`.
 
