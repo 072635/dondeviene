@@ -1,0 +1,24 @@
+# Despliegue en Render (render.com): New → Blueprint → elige este repositorio.
+services:
+  - type: web
+    name: dondeviene
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEMO
+        value: "1"
+      - key: ADMIN_EMAIL
+        value: admin@dondeviene.mx
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DB_FILE
+        value: /var/data/dondeviene.db
+    disk:
+      name: datos
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,0 +1,21 @@
+{
+  "name": "dondeviene",
+  "version": "1.0.0",
+  "description": "¿Dónde Viene? Transporte público en tiempo real",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "express": "^5.1.0",
+    "leaflet": "^1.9.4"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "private": true
+}
