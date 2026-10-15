@@ -1,0 +1,13 @@
+{
+  "appId": "mx.dondeviene.app",
+  "appName": "¿Dónde Viene?",
+  "webDir": "www",
+  "android": {
+    "useLegacyBridge": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

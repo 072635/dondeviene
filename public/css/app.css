@@ -48,7 +48,7 @@ a{color:var(--accent)}
 .stack{display:flex;flex-direction:column;gap:12px;min-width:0}
 
 .map{height:min(70vh,640px);border-radius:14px;border:1px solid var(--line);overflow:hidden;background:#BEE2DB;z-index:0}
-@media (max-width:900px){.map{height:46vh}}
+@media (max-width:900px){.map{height:36vh;min-height:240px}}
 @media (min-width:901px){.sticky{position:sticky;top:80px}}
 
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -189,5 +189,6 @@ td select{padding:6px 8px;font-size:13px}
 .toast button{border:0;background:transparent;color:inherit;font-weight:700;cursor:pointer;text-decoration:underline}
 .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:grid;place-items:center;z-index:3000;padding:16px}
 .modal{background:var(--surface);border-radius:14px;padding:18px;width:100%;max-width:400px;display:flex;flex-direction:column;gap:12px}
+.live-on{color:var(--ok);font-weight:600}
 .loading{min-height:100vh;display:grid;place-items:center;color:var(--muted)}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}

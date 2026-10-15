@@ -6,10 +6,16 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "native:build": "node scripts/build-native.mjs && npx cap sync",
+    "android:apk": "npm run native:build && cd android && ./gradlew assembleDebug",
+    "android:bundle": "npm run native:build && cd android && ./gradlew bundleRelease"
   },
   "license": "UNLICENSED",
   "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/local-notifications": "^8.3.1",
     "express": "^5.1.0",
     "leaflet": "^1.9.4"
   },
@@ -17,5 +23,10 @@
   "engines": {
     "node": ">=22.13"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/ios": "^8.5.3"
+  }
 }

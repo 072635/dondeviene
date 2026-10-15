@@ -4,13 +4,29 @@ export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// En la app nativa las pantallas vienen del teléfono y la API está en el servidor publicado.
+export const NATIVE = !!window.Capacitor?.isNativePlatform?.();
+export const API_BASE = NATIVE ? String(window.DV_CONFIG?.apiBase || '').replace(/\/$/, '') : '';
+
+export function getToken() { return NATIVE ? store('dv-token') : null; }
+export function setToken(tok) {
+  if (!NATIVE) return;
+  try { if (tok) localStorage.setItem('dv-token', tok); else localStorage.removeItem('dv-token'); } catch { /* sin almacenamiento */ }
+}
+
 export async function api(path, { method = 'GET', body } = {}) {
   let res;
+  const headers = body !== undefined ? { 'Content-Type': 'application/json' } : {};
+  if (NATIVE) {
+    headers['X-DV-Client'] = 'native';
+    const tok = getToken();
+    if (tok) headers.Authorization = `Bearer ${tok}`;
+  }
   try {
-    res = await fetch('/api' + path, {
+    res = await fetch(API_BASE + '/api' + path, {
       method,
-      credentials: 'same-origin',
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+      credentials: NATIVE ? 'omit' : 'same-origin',
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {

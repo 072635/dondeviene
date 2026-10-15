@@ -11,6 +11,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LEVELS = ['vacia', 'media', 'llena'];
 const REASONS = ['no_se_detuvo', 'manejo_peligroso', 'cobro_incorrecto', 'sin_aire_sucia', 'mal_trato', 'otro'];
 const INCIDENTS = { trafico: 'Tráfico lento', accidente: 'Accidente en la vía', falla: 'Falla mecánica', gente: 'Parada con mucha gente' };
+const NATIVE_ORIGINS = new Set(['capacitor://localhost', 'https://localhost', 'http://localhost', 'ionic://localhost']);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const str = (v, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -22,6 +23,21 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
   const limiter = makeLoginLimiter();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
+  // La app nativa carga sus pantallas desde el teléfono (capacitor://localhost o https://localhost) y llama a esta API.
+  app.use('/api', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && NATIVE_ORIGINS.has(origin)) {
+      res.set({
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-DV-Client',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE',
+        'Access-Control-Max-Age': '600',
+        Vary: 'Origin',
+      });
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    }
+    next();
+  });
   app.use(express.json({ limit: '200kb' }));
   app.use(loadUser(db));
 
@@ -53,8 +69,10 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     return ev;
   };
 
-  const login = (res, user) => {
+  // La app web usa una cookie que JavaScript no puede leer; la app nativa recibe el token para guardarlo en el teléfono.
+  const login = (req, res, user) => {
     const { token, expires } = createSession(db, user.id);
+    if (req.get('X-DV-Client') === 'native') return res.json({ user: publicUser(user), token });
     res.setHeader('Set-Cookie', sessionCookie(token, expires, secureCookies));
     return res.json({ user: publicUser(user) });
   };
@@ -69,7 +87,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'Ya existe una cuenta con ese correo. Inicia sesión.' });
     const r = db.prepare('INSERT INTO users (name, email, phone, pass, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(name, email, phone, hashPassword(password), 'pasajero', Date.now());
-    return login(res.status(201), userById.get(r.lastInsertRowid));
+    return login(req, res.status(201), userById.get(r.lastInsertRowid));
   });
 
   app.post('/api/auth/login', (req, res) => {
@@ -83,7 +101,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     }
     if (!user.active) return res.status(403).json({ error: 'Esta cuenta está desactivada. Habla con la administración.' });
     limiter.reset(key);
-    return login(res, user);
+    return login(req, res, user);
   });
 
   app.post('/api/auth/logout', (req, res) => {

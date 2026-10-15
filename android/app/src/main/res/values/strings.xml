@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">¿Dónde Viene?</string>
+    <string name="title_activity_main">¿Dónde Viene?</string>
+    <string name="package_name">mx.dondeviene.app</string>
+    <string name="custom_url_scheme">mx.dondeviene.app</string>
+    <string name="capacitor_background_geolocation_notification_channel_name">Turno activo</string>
+    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_stat_bus</string>
+    <string name="capacitor_background_geolocation_notification_color">#9D2449</string>
+</resources>

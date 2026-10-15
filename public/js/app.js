@@ -1,4 +1,4 @@
-import { $, api, esc, modal, toast } from './ui.js';
+import { $, api, esc, modal, toast, setToken, NATIVE } from './ui.js';
 import { t, getLang, setLang } from './i18n.js';
 
 const root = $('#app');
@@ -68,6 +68,7 @@ function renderAuth(mode = 'login', message = '') {
       const body = { email: $('#fEmail').value, password: $('#fPass').value };
       if (mode === 'register') Object.assign(body, { name: $('#fName').value, phone: $('#fPhone').value });
       const r = await api(mode === 'login' ? '/auth/login' : '/auth/register', { method: 'POST', body });
+      if (r.token) setToken(r.token);
       state.user = r.user; state.guest = false;
       render();
     } catch (ex) {
@@ -123,6 +124,7 @@ function accountMenu() {
   $('#mClose', m.el).onclick = m.close;
   $('#mOut', m.el).onclick = async () => {
     try { await api('/auth/logout', { method: 'POST', body: {} }); } catch { /* sin conexión: igual salimos */ }
+    setToken(null);
     m.close(); state.user = null; state.guest = false; render();
   };
   $('#pwForm', m.el).onsubmit = async (e) => {
@@ -135,7 +137,7 @@ function accountMenu() {
   };
 }
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+if ('serviceWorker' in navigator && !NATIVE && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
 

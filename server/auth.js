@@ -54,7 +54,10 @@ export function loadUser(db) {
   const q = db.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
                         WHERE s.token = ? AND s.expires_at > ? AND u.active = 1`);
   return (req, _res, next) => {
-    const token = parseCookies(req.headers.cookie)[COOKIE];
+    // Web: cookie HttpOnly. App nativa: encabezado Authorization. Transmisión en vivo: ?token= (EventSource no envía encabezados).
+    const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || '')?.[1];
+    const queryToken = req.path === '/api/stream' && typeof req.query.token === 'string' ? req.query.token : null;
+    const token = bearer || queryToken || parseCookies(req.headers.cookie)[COOKIE];
     req.sessionToken = token;
     req.user = token ? q.get(token, Date.now()) || null : null;
     next();

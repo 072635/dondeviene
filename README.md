@@ -77,11 +77,24 @@ Queda con su ícono en la pantalla de inicio y se abre a pantalla completa.
 3. En **Ruta → Paradas**, corrige los nombres y las coordenadas con las paradas oficiales.
 4. Apaga las unidades de demostración en el Tablero.
 
-## Limitación importante del GPS
+## App nativa (Android y iPhone)
 
-Una app web solo puede enviar la ubicación **mientras está abierta en pantalla**. La app pide al celular que no apague la pantalla durante el turno, pero si el conductor cambia de app o bloquea el teléfono, la ubicación deja de enviarse hasta que vuelva.
+La carpeta `android/` y la carpeta `ios/` tienen la app nativa hecha con Capacitor. Usa las mismas pantallas que la web y agrega el **GPS en segundo plano**: el conductor puede bloquear el teléfono y la ubicación se sigue enviando, con un aviso fijo de "Turno activo" en la barra de notificaciones. La ubicación se apaga sola al terminar el turno.
 
-Para el piloto basta con un soporte y un cargador en cada unidad. Para operar a escala conviene empaquetarla como app nativa (por ejemplo con Capacitor), que sí puede enviar la ubicación en segundo plano. Esa versión nativa es también la que se sube a App Store y Google Play.
+1. Publica el servidor y escribe su dirección en `public/config.js` (`apiBase`).
+2. `npm run native:build` copia la app web a los proyectos nativos.
+3. **Android:** `npm run android:apk` genera un APK de prueba en `android/app/build/outputs/apk/debug/`. Para Google Play, abre `android/` en Android Studio, crea tu firma (Build → Generate Signed Bundle) y sube el `.aab`.
+4. **iPhone:** en una Mac con Xcode abre `ios/App/App.xcodeproj`, elige tu equipo de Apple Developer y usa Product → Archive.
+
+Los permisos ya están configurados: ubicación, servicio en primer plano de tipo ubicación y notificaciones en Android; `UIBackgroundModes: location` y los textos de permiso en iPhone.
+
+La app nativa inicia sesión con un token que se guarda en el teléfono; la web sigue usando una cookie que JavaScript no puede leer.
+
+## Limitación del GPS en la versión web
+
+Si se usa desde el navegador (no la app nativa), solo puede enviar la ubicación **mientras está abierta en pantalla**. La app pide al celular que no apague la pantalla durante el turno, pero si el conductor cambia de app o bloquea el teléfono, la ubicación deja de enviarse hasta que vuelva.
+
+La app nativa no tiene esta limitación.
 
 ## Pruebas
 

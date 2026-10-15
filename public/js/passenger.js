@@ -57,7 +57,7 @@ export async function mount(view, { user }) {
     st.units = [];
     unsub = subscribe(r.id, {
       snapshot: (s) => { st.units = s.units; mapCtl.setBuses(s.units); renderNext(); },
-      status: (ok) => { st.online = ok; $('#pLive').textContent = ok ? `● ${t('live')}` : t('reconnecting'); },
+      status: (ok) => { st.online = ok; $('#pLive').textContent = ok ? `● ${t('live')}` : t('reconnecting'); $('#pLive').classList.toggle('live-on', ok); },
     });
     selectStop(st.stop);
   }

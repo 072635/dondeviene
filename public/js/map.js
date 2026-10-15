@@ -1,5 +1,5 @@
 // Mapa con Leaflet + OpenStreetMap: trazo de la ruta, paradas y unidades en vivo.
-import { esc } from './ui.js';
+import { esc, API_BASE, getToken } from './ui.js';
 
 const L = window.L;
 
@@ -63,7 +63,8 @@ export function createMap(el, route, { onStopClick } = {}) {
 
 // Conexión en vivo a una ruta (Server-Sent Events) con reconexión automática del navegador.
 export function subscribe(routeId, handlers) {
-  const es = new EventSource(`/api/stream?route=${routeId}`);
+  const tok = getToken();
+  const es = new EventSource(`${API_BASE}/api/stream?route=${routeId}${tok ? `&token=${encodeURIComponent(tok)}` : ''}`);
   es.addEventListener('snapshot', (e) => handlers.snapshot?.(JSON.parse(e.data)));
   es.addEventListener('event', (e) => handlers.event?.(JSON.parse(e.data)));
   es.addEventListener('report', (e) => handlers.report?.(JSON.parse(e.data)));

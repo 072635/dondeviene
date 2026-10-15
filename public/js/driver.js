@@ -1,4 +1,4 @@
-import { $, $$, api, esc, toast, hhmm, adviceHTML } from './ui.js';
+import { $, $$, api, esc, toast, hhmm, adviceHTML, NATIVE } from './ui.js';
 import { createMap, subscribe } from './map.js';
 
 const SEND_EVERY_MS = 5000;
@@ -10,7 +10,7 @@ export async function mount(view) {
     return () => {};
   }
 
-  const st = { shift: me.shift, status: me.status, watch: null, lastSent: 0, pending: null, gps: 'off', wake: null, sending: false };
+  const st = { shift: me.shift, status: me.status, watch: null, bgId: null, lastSent: 0, pending: null, gps: 'off', wake: null, sending: false };
   let mapCtl, unsub, alertsTimer;
 
   view.innerHTML = `
@@ -32,7 +32,7 @@ export async function mount(view) {
       <div class="card">
         <div class="drv-head"><span class="sign">${esc(me.route.code)}</span><div><b>Unidad ${esc(me.unit.number)}</b><div class="sub">${esc(me.route.name)}</div></div></div>
         ${summary ? `<div class="okmsg">Turno terminado: ${summary.km} km y ${summary.trips} vueltas.</div>` : ''}
-        <p class="sub" style="margin:0">Al iniciar tu turno la app usa el GPS de tu celular para avisarte a cuánto vas de las otras unidades. Deja la app abierta y el celular cargando.</p>
+        <p class="sub" style="margin:0">Al iniciar tu turno la app usa el GPS de tu celular para avisarte a cuánto vas de las otras unidades. ${NATIVE ? 'La ubicación se sigue enviando aunque bloquees el teléfono, y se apaga sola al terminar tu turno.' : 'Deja la app abierta y el celular cargando.'}</p>
         <div class="error" id="dErr" hidden></div>
         <button class="btn" id="dStart">Iniciar turno</button>
       </div>`;
@@ -139,7 +139,35 @@ export async function mount(view) {
   }
 
   // ---------- GPS ----------
-  function startGps() {
+  // App nativa: GPS en segundo plano con aviso fijo en la barra de notificaciones (como Uber).
+  // Navegador: GPS mientras la app está abierta en pantalla.
+  const BG = NATIVE ? window.Capacitor?.registerPlugin?.('BackgroundGeolocation') : null;
+
+  async function startGps() {
+    if (BG) {
+      try {
+        // Android 13+: permiso para mostrar el aviso fijo de "turno activo".
+        try { await window.Capacitor.registerPlugin('LocalNotifications').requestPermissions(); } catch { /* opcional */ }
+        st.bgId = await BG.addWatcher({
+          backgroundTitle: '¿Dónde Viene? · Turno activo',
+          backgroundMessage: `Unidad ${me.unit.number}: compartiendo tu ubicación con la ruta hasta que termines tu turno.`,
+          requestPermissions: true,
+          stale: false,
+          distanceFilter: 10,
+        }, (loc, err) => {
+          if (err) {
+            st.gps = 'off'; renderStatus();
+            if (err.code === 'NOT_AUTHORIZED') {
+              toast('La app necesita permiso de ubicación. Ábrelo en Ajustes y elige "Permitir siempre".', 15000);
+              BG.openSettings?.();
+            }
+            return;
+          }
+          if (loc) onFix({ coords: { latitude: loc.latitude, longitude: loc.longitude, accuracy: loc.accuracy }, timestamp: loc.time || Date.now() });
+        });
+        return;
+      } catch (e) { toast('No se pudo iniciar el GPS: ' + e.message); }
+    }
     if (!('geolocation' in navigator)) { st.gps = 'off'; toast('Este celular no tiene GPS disponible en el navegador.'); return; }
     st.watch = navigator.geolocation.watchPosition(onFix, (err) => {
       st.gps = 'off'; renderStatus();
@@ -149,6 +177,7 @@ export async function mount(view) {
   }
 
   function stopGps() {
+    if (st.bgId) { BG.removeWatcher({ id: st.bgId }).catch(() => {}); st.bgId = null; }
     if (st.watch !== null) navigator.geolocation.clearWatch(st.watch);
     st.watch = null;
     st.wake?.release?.().catch(() => {});
@@ -183,7 +212,7 @@ export async function mount(view) {
   async function requestWakeLock() {
     try { if ('wakeLock' in navigator) st.wake = await navigator.wakeLock.request('screen'); } catch { /* la pantalla puede apagarse */ }
   }
-  const onVisible = () => { if (document.visibilityState === 'visible' && st.watch !== null) requestWakeLock(); };
+  const onVisible = () => { if (document.visibilityState === 'visible' && st.watch !== null && !st.bgId) requestWakeLock(); };
   document.addEventListener('visibilitychange', onVisible);
 
   // ---------- Turno ----------

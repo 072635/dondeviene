@@ -3,3 +3,10 @@ data/
 *.db
 *.db-*
 .env
+www/
+android/app/build/
+android/.gradle/
+android/local.properties
+ios/App/Pods/
+dondeviene.zip
+*.apk
