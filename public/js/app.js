@@ -52,6 +52,7 @@ function renderAuth(mode = 'login', message = '') {
         </div>
       </form>
       <div class="guest">${esc(t('guest'))} <button class="link" id="guestBtn">${esc(t('guestBtn'))}</button></div>
+      ${/Android/i.test(navigator.userAgent) && !NATIVE ? `<div class="guest"><a href="/descargas/dondeviene.apk" style="color:var(--gold-light);font-weight:700">Descargar la app para Android</a></div>` : ''}
       ${state.config.demo ? `<div class="demo-accounts">Cuentas de prueba (contraseña demo1234): pasajero@demo.mx · conductor07@demo.mx · admin@dondeviene.mx (admin1234)</div>` : ''}
     </div>
   </main>`;

@@ -9,6 +9,8 @@ fs.cpSync(path.join(root, 'public'), out, { recursive: true });
 fs.cpSync(path.join(root, 'node_modules', 'leaflet', 'dist'), path.join(out, 'vendor', 'leaflet'), { recursive: true });
 // El service worker es solo para la versión web.
 fs.rmSync(path.join(out, 'sw.js'), { force: true });
+// La app no se incluye a sí misma.
+fs.rmSync(path.join(out, 'descargas'), { recursive: true, force: true });
 
 const apiBase = process.env.API_BASE;
 if (apiBase) {

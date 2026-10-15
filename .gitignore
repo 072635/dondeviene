@@ -10,3 +10,4 @@ android/local.properties
 ios/App/Pods/
 dondeviene.zip
 *.apk
+!public/descargas/dondeviene.apk

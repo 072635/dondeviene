@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que abra rápido y sin conexión. Los datos en vivo siempre vienen de la red.
-const CACHE = 'dondeviene-v1';
+const CACHE = 'dondeviene-v2';
 const SHELL = [
   '/', '/css/app.css', '/js/app.js', '/js/ui.js', '/js/i18n.js', '/js/map.js', '/js/geo.js',
   '/js/passenger.js', '/js/driver.js', '/js/admin.js',
@@ -18,7 +18,7 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/descargas/')) return;
   // Red primero; si no hay conexión, la copia guardada.
   e.respondWith(
     fetch(e.request).then((res) => {
