@@ -39,7 +39,7 @@ Las unidades simuladas se apagan desde el Tablero, en la casilla "Unidades de de
 | `ADMIN_EMAIL` | Correo de la cuenta de administración | `admin@dondeviene.mx` |
 | `ADMIN_PASSWORD` | Contraseña de esa cuenta. Es obligatoria con `DEMO=0` | `admin1234` solo en demo |
 | `DEMO` | `0` desactiva las cuentas de prueba y el simulador | `1` |
-| `SIM` | `0` arranca sin unidades simuladas | `1` |
+| `SIM` | `1` muestra unidades simuladas aunque `DEMO=0`; `0` las desactiva | igual que `DEMO` |
 | `SIM_SPEED` | Acelera el simulador (por ejemplo `10`) | `1` |
 | `NODE_ENV` | `production` marca la cookie de sesión como segura (HTTPS) | — |
 

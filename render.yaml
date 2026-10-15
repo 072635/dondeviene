@@ -10,7 +10,11 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Sin cuentas de prueba en el servidor real.
       - key: DEMO
+        value: "0"
+      # Unidades simuladas en el mapa para presentar la app; se apagan desde el Tablero.
+      - key: SIM
         value: "1"
       - key: ADMIN_EMAIL
         value: admin@dondeviene.mx

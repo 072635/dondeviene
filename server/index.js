@@ -23,7 +23,8 @@ for (const shift of db.prepare('SELECT * FROM shifts WHERE ended_at IS NULL').al
 }
 
 const simulator = new Simulator(live, { speed: Number(process.env.SIM_SPEED) || 1 });
-if (DEMO && process.env.SIM !== '0') simulator.start();
+// Unidades simuladas: activas en demo, o en producción con SIM=1 (para presentaciones; se apagan desde el Tablero).
+if (process.env.SIM === '1' || (DEMO && process.env.SIM !== '0')) simulator.start();
 
 const app = createApp({ db, live, simulator, demo: DEMO, secureCookies: process.env.NODE_ENV === 'production' });
 const server = app.listen(PORT, () => {
