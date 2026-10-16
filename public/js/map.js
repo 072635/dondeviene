@@ -26,6 +26,7 @@ function addBaseMap(map) {
 
 export function createMap(el, route, { onStopClick } = {}) {
   const map = L.map(el, { zoomControl: true, attributionControl: true });
+  map.attributionControl.setPrefix(false); // los créditos obligatorios (OpenStreetMap, OpenFreeMap) se mantienen
   addBaseMap(map);
 
   const css = getComputedStyle(document.documentElement);
