@@ -40,7 +40,8 @@ export function createMap(el, route, { onStopClick } = {}) {
     // El mapa necesita una vista antes de dibujar capas.
     map.fitBounds(L.latLngBounds(r.path), { padding: [24, 24] });
     line?.remove();
-    line = L.polyline(r.path, { color: accent, weight: 5, opacity: 0.85 }).addTo(map);
+    // La línea no captura toques: así tocar sobre la ruta llega al mapa (p. ej. para agregar una parada).
+    line = L.polyline(r.path, { color: accent, weight: 5, opacity: 0.85, interactive: false }).addTo(map);
     stopLayer.clearLayers();
     r.stops.forEach((s, k) => {
       const m = L.circleMarker([s.lat, s.lng], { radius: 6, color: accent, weight: 2, fillColor: '#FFFFFF', fillOpacity: 1 })
@@ -65,7 +66,8 @@ export function createMap(el, route, { onStopClick } = {}) {
       const icon = L.divIcon({ className: '', html: `<div class="${cls}">${esc(u.number)}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
       let m = buses.get(u.id);
       if (!m) {
-        m = L.marker([u.lat, u.lng], { icon, keyboard: false }).addTo(map);
+        // bubblingMouseEvents: un toque sobre un camión también llega al mapa.
+        m = L.marker([u.lat, u.lng], { icon, keyboard: false, bubblingMouseEvents: true }).addTo(map);
         buses.set(u.id, m);
       } else {
         m.setLatLng([u.lat, u.lng]);

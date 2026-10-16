@@ -1,33 +1,55 @@
 import { $, $$, api, esc, toast, hhmm, dateTime, modal } from './ui.js';
 import { createMap, subscribe } from './map.js';
+import { makeRoute } from './geo.js';
 
 const TABS = [['board', 'Tablero'], ['map', 'Mapa'], ['events', 'Avisos'], ['reports', 'Reportes'], ['units', 'Unidades'], ['people', 'Personal'], ['route', 'Ruta']];
 const REASON = { no_se_detuvo: 'No se detuvo', manejo_peligroso: 'Manejo peligroso', cobro_incorrecto: 'Cobro incorrecto', sin_aire_sucia: 'Sin aire / sucia', mal_trato: 'Mal trato', otro: 'Otro' };
 const OCC = { vacia: 'Vacía', media: 'Media', llena: 'Llena' };
 
 export async function mount(view) {
-  const { routes } = await api('/routes');
-  const route = routes[0];
+  let { routes } = await api('/routes');
+  let route = routes.find((r) => String(r.id) === sessionStorage.getItem('dv-admin-route')) || routes[0];
   let tab = sessionStorage.getItem('dv-admin-tab') || 'board';
-  let mapCtl = null, boardTimer = null;
+  let mapCtl = null, boardTimer = null, unsub = null;
 
   view.innerHTML = `
   <div class="page">
-    <div class="tabs" role="tablist">${TABS.map(([k, l]) => `<button type="button" role="tab" data-tab="${k}">${l}</button>`).join('')}</div>
+    <div class="row-actions" style="align-items:center;justify-content:space-between">
+      <div class="tabs" role="tablist" style="flex:1 1 520px">${TABS.map(([k, l]) => `<button type="button" role="tab" data-tab="${k}">${l}</button>`).join('')}</div>
+      <label class="check" style="gap:10px"><span class="label">Ruta</span><select id="aRoute" style="width:auto;min-width:200px"></select></label>
+    </div>
     <div id="aView" class="stack"></div>
   </div>`;
   $$('[data-tab]').forEach((b) => b.onclick = () => show(b.dataset.tab));
 
+  function fillRoutes() {
+    $('#aRoute').innerHTML = routes.map((r) => `<option value="${r.id}">${esc(r.code)} · ${esc(r.name)}</option>`).join('');
+    $('#aRoute').value = route.id;
+  }
+  $('#aRoute').onchange = (e) => selectRoute(Number(e.target.value));
+
+  async function reloadRoutes() { ({ routes } = await api('/routes')); route = routes.find((r) => r.id === route.id) || routes[0]; fillRoutes(); }
+
+  function selectRoute(id) {
+    route = routes.find((r) => r.id === id) || routes[0];
+    sessionStorage.setItem('dv-admin-route', String(route.id));
+    fillRoutes(); listen(); show(tab);
+  }
+
   // Avisos en vivo para administración (emergencias, incidentes, reportes).
-  const unsub = subscribe(route.id, {
-    snapshot: (s) => { mapCtl?.setBuses(s.units); mapCtl?.setWaiting(s.waiting); },
-    event: (e) => {
-      if (e.level === 'crit') toast(`⚠ ${e.text}`, 20000);
-      if (tab === 'events') renderEvents();
-      if (tab === 'board') renderBoard();
-    },
-    report: () => { if (tab === 'reports') renderReports(); },
-  });
+  function listen() {
+    unsub?.();
+    unsub = subscribe(route.id, {
+      snapshot: (s) => { mapCtl?.setBuses(s.units); mapCtl?.setWaiting(s.waiting); },
+      event: (e) => {
+        if (e.level === 'crit') toast(`⚠ ${e.text}`, 20000);
+        if (tab === 'events') renderEvents();
+        if (tab === 'board') renderBoard();
+      },
+      report: () => { if (tab === 'reports') renderReports(); },
+    });
+  }
+  fillRoutes(); listen();
 
   function show(k) {
     tab = k; sessionStorage.setItem('dv-admin-tab', k);
@@ -136,7 +158,8 @@ export async function mount(view) {
     $('#aView').innerHTML = `
       <div class="card"><h3 style="font-family:var(--font-display);font-size:21px">Unidades</h3>
         <div class="tbl"><table><thead><tr><th>Unidad</th><th>Ruta</th><th>Placas</th><th>Rampa</th><th>Activa</th><th>Conductor</th></tr></thead><tbody>
-        ${units.map((u) => `<tr><td><span class="unit">${esc(u.number)}</span></td><td>${esc(u.route_code)}</td>
+        ${units.map((u) => `<tr><td><span class="unit">${esc(u.number)}</span></td>
+          <td><select data-route="${u.id}" aria-label="Ruta de la unidad ${esc(u.number)}" style="padding:6px 8px;width:auto">${routes.map((r) => `<option value="${r.id}" ${r.id === u.route_id ? 'selected' : ''}>${esc(r.code)}</option>`).join('')}</select></td>
           <td><input data-plate="${u.id}" value="${esc(u.plate || '')}" aria-label="Placas de la unidad ${esc(u.number)}" style="padding:6px 8px;max-width:130px"></td>
           <td><input type="checkbox" data-acc="${u.id}" ${u.accessible ? 'checked' : ''} aria-label="Unidad ${esc(u.number)} con rampa"></td>
           <td><input type="checkbox" data-act="${u.id}" ${u.active ? 'checked' : ''} aria-label="Unidad ${esc(u.number)} activa"></td>
@@ -152,6 +175,7 @@ export async function mount(view) {
         <button class="btn small" type="submit">Agregar unidad</button></form>`;
     const patch = async (id, body) => { try { await api(`/admin/units/${id}`, { method: 'PATCH', body }); toast('Unidad actualizada.'); } catch (e) { toast(e.message); } };
     $$('[data-plate]').forEach((i) => i.onchange = () => patch(i.dataset.plate, { plate: i.value }));
+    $$('[data-route]').forEach((i) => i.onchange = async () => { await patch(i.dataset.route, { routeId: Number(i.value) }); await reloadRoutes(); });
     $$('[data-acc]').forEach((i) => i.onchange = () => patch(i.dataset.acc, { accessible: i.checked }));
     $$('[data-act]').forEach((i) => i.onchange = () => patch(i.dataset.act, { active: i.checked }));
     $('#uForm').onsubmit = async (e) => {
@@ -215,23 +239,121 @@ export async function mount(view) {
   }
 
   // ---------- Ruta ----------
+  // Modos del mapa: 'stop' agrega una parada donde se toca; 'path' agrega puntos para trazar por las calles.
+  const draw = { mode: null, pts: [], layer: null };
+
   async function renderRoute() {
     let shifts;
-    try { ({ shifts } = await api('/admin/shifts')); } catch (e) { return fail(e); }
+    try { ({ shifts } = await api('/admin/shifts')); await reloadRoutes(); } catch (e) { return fail(e); }
     if (tab !== 'route') return;
-    const fresh = (await api('/routes')).routes.find((r) => r.id === route.id);
+    const fresh = route;
+    const geo = makeRoute(fresh.path, fresh.stops);
+    draw.mode = null; draw.pts = [];
     $('#aView').innerHTML = `
+      <div class="card">
+        <h3 style="font-family:var(--font-display);font-size:21px">${esc(fresh.code)} en el mapa</h3>
+        <p class="sub" style="margin:0">Trazo actual: ${(fresh.length / 1000).toFixed(1)} km · ${fresh.stops.length} paradas.</p>
+        <div class="row-actions">
+          <button class="ghost" id="mStop" type="button" aria-pressed="false">Agregar parada tocando el mapa</button>
+          <button class="ghost" id="mPath" type="button" aria-pressed="false">Dibujar trazo nuevo</button>
+        </div>
+        <p class="sub" id="mHint" style="margin:0" aria-live="polite"></p>
+        <div class="map" id="rMap" style="height:60vh"></div>
+        <div class="stack" id="dPanel" hidden>
+          <div class="row-actions" style="align-items:center">
+            <b id="dCount">0 puntos</b>
+            <button class="ghost" id="dUndo" type="button">Quitar el último</button>
+            <button class="ghost" id="dClear" type="button">Borrar puntos</button>
+            <button class="btn small" id="dApply" type="button">Reemplazar el trazo de ${esc(fresh.code)}</button>
+          </div>
+          <div class="error" id="dErr" hidden></div>
+        </div>
+      </div>
       <div class="card"><h3 style="font-family:var(--font-display);font-size:21px">Paradas de la ${esc(fresh.code)}</h3>
-        <p class="sub" style="margin:0">En orden de ida. La primera y la última son las terminales. Trazo actual: ${(fresh.length / 1000).toFixed(1)} km.</p>
+        <p class="sub" style="margin:0">Se guardan en el orden en que la unidad las encuentra de ida. La primera y la última son las terminales.</p>
         <div class="tbl"><table><thead><tr><th>#</th><th>Nombre</th><th>Km</th><th>Latitud</th><th>Longitud</th><th></th></tr></thead><tbody id="sRows">
-        ${fresh.stops.map((s, i) => stopRow(s, i)).join('')}</tbody></table></div>
-        <div class="row-actions"><button class="ghost" id="sAdd" type="button">Agregar parada</button><button class="btn small" id="sSave" type="button">Guardar paradas</button></div>
+        ${fresh.stops.map((st, i) => stopRow(st, i)).join('')}</tbody></table></div>
+        <div class="row-actions"><button class="ghost" id="sAdd" type="button">Agregar fila vacía</button><button class="btn small" id="sSave" type="button">Guardar paradas</button></div>
         <div class="error" id="sErr" hidden></div></div>
+      <form class="card" id="nForm" novalidate><h3 style="font-family:var(--font-display);font-size:21px">Crear ruta nueva</h3>
+        <ol class="sub" style="margin:0;padding-left:18px">
+          <li>Arriba toca <b>Dibujar trazo nuevo</b> y marca en el mapa el inicio, algunos puntos del camino y el final, en orden.</li>
+          <li>Escribe la clave y el nombre, y toca <b>Crear ruta</b>. El trazo sigue las calles reales.</li>
+          <li>Después agrega las paradas y asigna las unidades en la pestaña Unidades.</li>
+        </ol>
+        <div class="form-grid">
+          <div class="field"><label class="label" for="nCode">Clave</label><input id="nCode" placeholder="R-1" maxlength="10"></div>
+          <div class="field" style="grid-column:span 2"><label class="label" for="nName">Nombre</label><input id="nName" placeholder="Centro ⟷ Zona Hotelera" maxlength="80"></div>
+        </div>
+        <div class="error" id="nErr" hidden></div>
+        <button class="btn small" type="submit">Crear ruta con los puntos marcados</button></form>
       <div class="card"><h3 style="font-family:var(--font-display);font-size:21px">Trazo desde un recorrido grabado</h3>
-        <p class="sub" style="margin:0">Pide a un conductor que haga una vuelta completa con la app. Luego elige su turno aquí y la ida de ese recorrido se vuelve el trazo de la ruta.</p>
+        <p class="sub" style="margin:0">Otra opción: un conductor hace una vuelta completa con la app, eliges su turno aquí y la ida de ese recorrido se vuelve el trazo de la ruta.</p>
         ${shifts.length ? `<div class="tbl"><table><thead><tr><th>Inicio</th><th>Unidad</th><th>Conductor</th><th class="n">Km</th><th class="n">Puntos GPS</th><th></th></tr></thead><tbody>
-        ${shifts.map((s) => `<tr><td>${dateTime(s.started_at)}</td><td><span class="unit">${esc(s.unit_number)}</span></td><td>${esc(s.driver_name)}</td><td class="n">${s.km.toFixed(1)}</td><td class="n">${s.points}</td>
-          <td><button class="ghost" data-shift="${s.id}" style="padding:5px 10px" ${s.points < 10 ? 'disabled' : ''}>Usar como trazo</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Todavía no hay turnos grabados.</div>'}</div>`;
+        ${shifts.map((sh) => `<tr><td>${dateTime(sh.started_at)}</td><td><span class="unit">${esc(sh.unit_number)}</span></td><td>${esc(sh.driver_name)}</td><td class="n">${sh.km.toFixed(1)}</td><td class="n">${sh.points}</td>
+          <td><button class="ghost" data-shift="${sh.id}" style="padding:5px 10px" ${sh.points < 10 ? 'disabled' : ''}>Usar como trazo</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Todavía no hay turnos grabados.</div>'}</div>`;
+
+    mapCtl = createMap($('#rMap'), fresh);
+    const L = window.L;
+    draw.layer = L.layerGroup().addTo(mapCtl.map);
+
+    const setMode = (m) => {
+      draw.mode = draw.mode === m ? null : m;
+      $('#mStop').setAttribute('aria-pressed', draw.mode === 'stop');
+      $('#mPath').setAttribute('aria-pressed', draw.mode === 'path');
+      $('#dPanel').hidden = draw.mode !== 'path' && !draw.pts.length;
+      $('#mHint').textContent = draw.mode === 'stop' ? 'Toca en el mapa dónde para la unidad. La parada se acomoda sobre la ruta; luego ponle nombre y guarda.'
+        : draw.mode === 'path' ? 'Toca en orden: inicio, algunos puntos del camino (uno en cada vuelta importante) y el final. Ponlos sobre la calle, en el carril de ida.' : '';
+      $('#rMap').style.cursor = draw.mode ? 'crosshair' : '';
+    };
+    const redraw = () => {
+      draw.layer.clearLayers();
+      if (draw.pts.length > 1) L.polyline(draw.pts, { color: '#1E6FD9', weight: 3, dashArray: '6 6' }).addTo(draw.layer);
+      draw.pts.forEach((p, i) => L.marker(p, { icon: L.divIcon({ className: '', html: `<div class="bus-marker" style="background:#1E6FD9;color:#fff;width:24px;height:24px;font-size:12px">${i + 1}</div>`, iconSize: [24, 24], iconAnchor: [12, 12] }) }).addTo(draw.layer));
+      $('#dCount').textContent = `${draw.pts.length} ${draw.pts.length === 1 ? 'punto' : 'puntos'}`;
+      $('#dPanel').hidden = draw.mode !== 'path' && !draw.pts.length;
+    };
+    $('#mStop').onclick = () => setMode('stop');
+    $('#mPath').onclick = () => setMode('path');
+    $('#dUndo').onclick = () => { draw.pts.pop(); redraw(); };
+    $('#dClear').onclick = () => { draw.pts = []; redraw(); };
+
+    mapCtl.map.on('click', (e) => {
+      if (draw.mode === 'path') {
+        if (draw.pts.length >= 25) return toast('Máximo 25 puntos.');
+        draw.pts.push([+e.latlng.lat.toFixed(6), +e.latlng.lng.toFixed(6)]); redraw();
+      } else if (draw.mode === 'stop') {
+        const { d, off } = geo.project(e.latlng.lat, e.latlng.lng);
+        if (off > 300) return toast('Ese punto está lejos de la ruta. Toca sobre la línea de la ruta.');
+        const [lat, lng] = geo.pointAt(d);
+        $('#sRows').insertAdjacentHTML('beforeend', stopRow({ name: 'Parada nueva', km: `Km ${(d / 1000).toFixed(1)}`, lat: +lat.toFixed(5), lng: +lng.toFixed(5) }, $$('#sRows tr').length));
+        bindDel();
+        const inp = $$('#sRows tr').at(-1).querySelector('[name=n]'); inp.focus(); inp.select();
+        L.circleMarker([lat, lng], { radius: 7, color: '#1E6FD9', weight: 3, fillColor: '#FFFFFF', fillOpacity: 1 }).addTo(draw.layer);
+        toast('Parada agregada a la lista. Ponle nombre y toca Guardar paradas.');
+      }
+    });
+
+    const traceMsg = (r) => `Trazo de ${r.km.toFixed(1)} km por las calles.` + (r.uturns.length ? ` Ojo: da vuelta en U cerca del km ${r.uturns.join(', ')}. Mueve o quita el punto cercano y vuelve a trazar.` : '');
+    $('#dApply').onclick = async () => {
+      const err = $('#dErr'); err.hidden = true;
+      if (draw.pts.length < 2) { err.textContent = 'Marca al menos el inicio y el final.'; err.hidden = false; return; }
+      $('#dApply').disabled = true;
+      try { const r = await api(`/admin/routes/${route.id}/trace`, { method: 'POST', body: { waypoints: draw.pts } }); toast(traceMsg(r), 15000); renderRoute(); }
+      catch (e) { err.textContent = e.message; err.hidden = false; $('#dApply').disabled = false; }
+    };
+    $('#nForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const err = $('#nErr'); err.hidden = true;
+      if (draw.pts.length < 2) { err.textContent = 'Primero toca «Dibujar trazo nuevo» y marca en el mapa al menos el inicio y el final.'; err.hidden = false; return; }
+      try {
+        const r = await api('/admin/routes', { method: 'POST', body: { code: $('#nCode').value, name: $('#nName').value, waypoints: draw.pts } });
+        toast(`Ruta ${r.route.code} creada. ${traceMsg(r)}`, 15000);
+        ({ routes } = await api('/routes'));
+        selectRoute(r.route.id);
+      } catch (ex) { err.textContent = ex.message; err.hidden = false; }
+    };
+
     $('#sAdd').onclick = () => { $('#sRows').insertAdjacentHTML('beforeend', stopRow({ name: '', km: '', lat: '', lng: '' }, $$('#sRows tr').length)); bindDel(); };
     const bindDel = () => $$('[data-del]').forEach((b) => b.onclick = () => b.closest('tr').remove());
     bindDel();
@@ -254,5 +376,5 @@ export async function mount(view) {
     <td><button class="ghost" type="button" data-del style="padding:4px 10px" aria-label="Quitar parada">Quitar</button></td></tr>`;
 
   show(tab);
-  return () => { clearInterval(boardTimer); unsub(); mapCtl?.destroy(); };
+  return () => { clearInterval(boardTimer); unsub?.(); mapCtl?.destroy(); };
 }

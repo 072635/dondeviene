@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que abra rápido y sin conexión. Los datos en vivo siempre vienen de la red.
-const CACHE = 'dondeviene-v4';
+const CACHE = 'dondeviene-v5';
 const SHELL = [
   '/', '/css/app.css', '/js/app.js', '/js/ui.js', '/js/i18n.js', '/js/map.js', '/js/geo.js',
   '/js/passenger.js', '/js/driver.js', '/js/admin.js',

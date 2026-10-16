@@ -61,6 +61,19 @@ docker build -t dondeviene .
 docker run -p 3000:3000 -v dondeviene-datos:/app/data -e ADMIN_PASSWORD=... -e DEMO=0 dondeviene
 ```
 
+## Agregar más rutas
+
+Desde **Administración → Ruta**:
+
+1. Toca **Dibujar trazo nuevo** y marca en el mapa, en orden, el inicio, algunos puntos del camino (uno en cada vuelta importante) y el final.
+2. Escribe la clave (por ejemplo `R-1`) y el nombre, y toca **Crear ruta**. La app traza el camino por las calles reales con OSRM (datos de OpenStreetMap) y avisa si el trazo da una vuelta en U, que suele ser un punto en el carril contrario.
+3. Con **Agregar parada tocando el mapa**, toca dónde para la unidad. La parada se acomoda sobre la ruta con su kilómetro.
+4. En **Unidades**, cambia cada camión a su ruta.
+
+También se puede usar como trazo el recorrido GPS de un conductor que hizo una vuelta completa.
+
+El trazado usa el servidor público y gratuito de OSRM. Para operar a escala conviene uno propio o de pago: se configura con la variable `OSRM_URL`.
+
 ## Instalarla en el celular
 
 Es una app web instalable (PWA):

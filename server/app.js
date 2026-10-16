@@ -6,6 +6,7 @@ import {
   loadUser, requireRole, publicUser, makeLoginLimiter,
 } from './auth.js';
 import { makeRoute, haversine } from '../public/js/geo.js';
+import { traceRoute as osrmTrace } from './routing.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LEVELS = ['vacia', 'media', 'llena'];
@@ -18,7 +19,7 @@ const str = (v, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const startOfDay = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
-export function createApp({ db, live, secureCookies = false, simulator = null, demo = false }) {
+export function createApp({ db, live, secureCookies = false, simulator = null, demo = false, traceRoute = osrmTrace }) {
   const app = express();
   const limiter = makeLoginLimiter();
   app.disable('x-powered-by');
@@ -353,7 +354,16 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     const plate = req.body.plate !== undefined ? str(req.body.plate, 15) || null : unit.plate;
     const accessible = req.body.accessible !== undefined ? (req.body.accessible ? 1 : 0) : unit.accessible;
     const active = req.body.active !== undefined ? (req.body.active ? 1 : 0) : unit.active;
-    db.prepare('UPDATE units SET plate = ?, accessible = ?, active = ? WHERE id = ?').run(plate, accessible, active, unit.id);
+    let routeId = unit.route_id;
+    if (req.body.routeId !== undefined) {
+      routeId = Number(req.body.routeId);
+      if (!live.route(routeId)) return res.status(400).json({ error: 'Esa ruta no existe.' });
+      if (routeId !== unit.route_id && live.units.get(unit.id) && !live.units.get(unit.id).sim) {
+        return res.status(409).json({ error: 'La unidad tiene un turno abierto. Cámbiala de ruta cuando termine el turno.' });
+      }
+    }
+    db.prepare('UPDATE units SET plate = ?, accessible = ?, active = ?, route_id = ? WHERE id = ?').run(plate, accessible, active, routeId, unit.id);
+    if (routeId !== unit.route_id) live.sim?.release(unit.id);
     const st = live.units.get(unit.id);
     if (st) st.accessible = !!accessible;
     res.json({ unit: unitById.get(unit.id) });
@@ -436,6 +446,8 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
       if (!str(s.name) || num(s.lat) === null || num(s.lng) === null) return res.status(400).json({ error: 'Cada parada necesita nombre, latitud y longitud.' });
     }
     try { makeRoute(route.path, stops); } catch (e) { return res.status(400).json({ error: e.message }); }
+    // Se guardan en el orden en que la unidad las encuentra de ida, sin importar cómo se capturaron.
+    stops.sort((a, b) => route.geo.project(a.lat, a.lng).d - route.geo.project(b.lat, b.lng).d);
     db.exec('BEGIN');
     try {
       db.prepare('DELETE FROM stops WHERE route_id = ?').run(route.id);
@@ -445,6 +457,52 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     live.loadRoutes();
     res.json({ route: live.publicRoute(live.route(route.id)) });
+  });
+
+  // Puntos tocados en el mapa (inicio, puntos intermedios y final) para trazar por las calles.
+  const readWaypoints = (body) => {
+    const w = Array.isArray(body.waypoints) ? body.waypoints : [];
+    if (w.length < 2 || w.length > 25) return null;
+    const ok = w.every((p) => Array.isArray(p) && num(p[0]) !== null && num(p[1]) !== null && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
+    return ok ? w.map((p) => [p[0], p[1]]) : null;
+  };
+
+  admin.post('/routes', async (req, res, next) => {
+    try {
+      const code = str(req.body.code, 10).toUpperCase(), name = str(req.body.name, 80);
+      if (!code) return res.status(400).json({ error: 'Escribe la clave de la ruta, por ejemplo R-1.' });
+      if (!name) return res.status(400).json({ error: 'Escribe el nombre de la ruta.' });
+      if (db.prepare('SELECT 1 FROM routes WHERE code = ?').get(code)) return res.status(409).json({ error: `Ya existe la ruta ${code}.` });
+      const waypoints = readWaypoints(req.body);
+      if (!waypoints) return res.status(400).json({ error: 'Toca en el mapa al menos el inicio y el final de la ruta (máximo 25 puntos).' });
+      const t = await traceRoute(waypoints);
+      const r = db.prepare('INSERT INTO routes (code, name, path) VALUES (?, ?, ?)').run(code, name, JSON.stringify(t.path));
+      const id = Number(r.lastInsertRowid);
+      const ins = db.prepare('INSERT INTO stops (route_id, seq, name, km, lat, lng) VALUES (?, ?, ?, ?, ?, ?)');
+      const first = t.path[0], last = t.path[t.path.length - 1];
+      ins.run(id, 0, 'Inicio', 'Km 0', first[0], first[1]);
+      ins.run(id, 1, 'Final', `Km ${t.km.toFixed(1)}`, last[0], last[1]);
+      live.loadRoutes();
+      res.status(201).json({ route: live.publicRoute(live.route(id)), km: t.km, uturns: t.uturns });
+    } catch (e) { next(e); }
+  });
+
+  admin.post('/routes/:id/trace', async (req, res, next) => {
+    try {
+      const route = live.route(Number(req.params.id));
+      if (!route) return res.status(404).json({ error: 'Ruta no encontrada.' });
+      const waypoints = readWaypoints(req.body);
+      if (!waypoints) return res.status(400).json({ error: 'Toca en el mapa al menos el inicio y el final de la ruta (máximo 25 puntos).' });
+      const t = await traceRoute(waypoints);
+      db.prepare('UPDATE routes SET path = ? WHERE id = ?').run(JSON.stringify(t.path), route.id);
+      // Las terminales se mueven al inicio y al final del trazo nuevo.
+      const stops = db.prepare('SELECT id FROM stops WHERE route_id = ? ORDER BY seq').all(route.id);
+      const upd = db.prepare('UPDATE stops SET lat = ?, lng = ? WHERE id = ?');
+      upd.run(t.path[0][0], t.path[0][1], stops[0].id);
+      upd.run(t.path[t.path.length - 1][0], t.path[t.path.length - 1][1], stops[stops.length - 1].id);
+      live.loadRoutes();
+      res.json({ route: live.publicRoute(live.route(route.id)), km: t.km, uturns: t.uturns });
+    } catch (e) { next(e); }
   });
 
   admin.post('/simulator', (req, res) => {
@@ -466,6 +524,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
 
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Datos mal formados.' });
+    if (err.status && err.status < 600) return res.status(err.status).json({ error: err.message });
     console.error(err);
     res.status(500).json({ error: 'Ocurrió un error en el servidor. Inténtalo de nuevo.' });
   });

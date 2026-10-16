@@ -13,7 +13,9 @@ before(async () => {
   seed(db, { adminEmail: 'admin@test.mx', adminPassword: 'admin-secreto', demo: true });
   live = new Live(db);
   const simulator = new Simulator(live);
-  const app = createApp({ db, live, simulator, demo: true });
+  // Servicio de rutas simulado: une los puntos en línea recta (las pruebas no dependen de internet).
+  const traceRoute = async (w) => ({ path: w, km: +(makeRoute(w).L / 1000).toFixed(2), uturns: [] });
+  const app = createApp({ db, live, simulator, demo: true, traceRoute });
   await new Promise((r) => { server = app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -243,4 +245,36 @@ test('geometría: llegada a un punto cualquiera de la ruta', () => {
   assert.ok(etaToPoint(r, bus, 6000, 1).rel > r.L);
   // Cerca de la terminal de inicio todos los camiones van de ida.
   assert.equal(etaToPoint(r, { s: 0 }, 50, 1).rel, 0);
+});
+
+test('administración: crear una ruta nueva, agregar paradas y asignarle una unidad', async () => {
+  const a = client();
+  await a('/auth/login', { method: 'POST', body: { email: 'admin@test.mx', password: 'admin-secreto' } });
+  const w = [[21.1600, -86.8500], [21.1700, -86.8400], [21.1800, -86.8300]];
+  assert.equal((await a('/admin/routes', { method: 'POST', body: { code: 'r-1', name: 'Prueba', waypoints: [w[0]] } })).status, 400);
+  const r = await a('/admin/routes', { method: 'POST', body: { code: 'r-1', name: 'Centro ⟷ Prueba', waypoints: w } });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.route.code, 'R-1');
+  assert.equal(r.data.route.stops.length, 2);
+  assert.equal((await a('/admin/routes', { method: 'POST', body: { code: 'R-1', name: 'Otra', waypoints: w } })).status, 409);
+  const id = r.data.route.id;
+
+  // Paradas capturadas en desorden: se guardan en el orden de la ruta.
+  const stops = [r.data.route.stops[0], { name: 'Final', lat: 21.18, lng: -86.83 }, { name: 'En medio', lat: 21.17, lng: -86.84 }];
+  const st = await a(`/admin/routes/${id}/stops`, { method: 'PUT', body: { stops } });
+  assert.equal(st.status, 200);
+  assert.deepEqual(st.data.route.stops.map((x) => x.name), ['Inicio', 'En medio', 'Final']);
+
+  // Redibujar el trazo mueve las terminales.
+  const tr = await a(`/admin/routes/${id}/trace`, { method: 'POST', body: { waypoints: [[21.1610, -86.8500], [21.1810, -86.8300]] } });
+  assert.equal(tr.status, 200);
+  assert.equal(tr.data.route.stops[0].lat, 21.161);
+
+  // La unidad 40 pasa a la ruta nueva y aparece en su lista.
+  const units = (await a('/admin/units')).data.units;
+  const u40 = units.find((u) => u.number === '40');
+  assert.equal((await a(`/admin/units/${u40.id}`, { method: 'PATCH', body: { routeId: id } })).status, 200);
+  const routes = (await client()('/routes')).data.routes;
+  assert.ok(routes.find((x) => x.id === id).units.some((u) => u.number === '40'));
+  assert.equal((await a(`/admin/units/${u40.id}`, { method: 'PATCH', body: { routeId: 999 } })).status, 400);
 });
