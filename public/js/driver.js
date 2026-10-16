@@ -24,7 +24,7 @@ export async function mount(view) {
   </div>`;
 
   mapCtl = createMap($('#dMap'), me.route);
-  unsub = subscribe(me.route.id, { snapshot: (s) => mapCtl.setBuses(s.units, { mine: me.unit.id }) });
+  unsub = subscribe(me.route.id, { snapshot: (s) => { mapCtl.setBuses(s.units, { mine: me.unit.id }); mapCtl.setWaiting(s.waiting); } });
 
   // ---------- Pantallas ----------
   function renderStart(summary) {
@@ -51,6 +51,10 @@ export async function mount(view) {
           <div class="gap" id="gB"><span class="label">Atrás</span><span class="big" id="gBt">—</span><span class="sub" id="gBu"></span></div>
         </div>
         <div id="dAdvice"></div>
+      </div>
+      <div class="card">
+        <p class="label">Gente esperando adelante</p>
+        <ul class="feed" id="dWaiting"></ul>
       </div>
       <div class="card">
         <p class="label">¿Cómo vas de pasaje? Toca cuando cambie</p>
@@ -126,6 +130,11 @@ export async function mount(view) {
     else a = adviceHTML('good', '✓', 'Vas bien espaciado', ` Lo ideal ahora es ~${H} min entre unidades.`);
     $('#dAdvice').innerHTML = a;
     $$('.occ button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.l === s.occ));
+    const wl = s.waitingAhead || [];
+    $('#dWaiting').innerHTML = wl.length
+      ? wl.slice(0, 5).map((w) => `<li><time>${w.minutes} min</time><span class="lv warn"></span><span>${w.km} km · cerca de ${esc(w.nearStop || '')}</span><span></span></li>`).join('')
+        + (wl.length > 5 ? `<li><time></time><span></span><span class="sub">y ${wl.length - 5} puntos más</span><span></span></li>` : '')
+      : '<li><time></time><span></span><span class="sub">Nadie ha avisado que espera antes de la siguiente unidad.</span><span></span></li>';
     $('#sKm').textContent = s.km.toFixed(1);
     $('#sTrips').textContent = s.trips;
   }

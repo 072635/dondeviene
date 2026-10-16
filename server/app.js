@@ -147,6 +147,29 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     req.on('close', remove);
   });
 
+  // ---------- Pasajeros esperando (anónimo, sin cuenta) ----------
+  const waitHits = new Map();
+  const WAIT_ID = /^[A-Za-z0-9_-]{16,64}$/;
+  app.post('/api/waiting', (req, res) => {
+    const now = Date.now();
+    const h = waitHits.get(req.ip) || { start: now, n: 0 };
+    if (now - h.start > 60e3) { h.start = now; h.n = 0; }
+    h.n++; waitHits.set(req.ip, h);
+    if (h.n > 20) return res.status(429).json({ error: 'Demasiados avisos seguidos. Espera un momento.' });
+    const id = String(req.body.id || ''), lat = num(req.body.lat), lng = num(req.body.lng);
+    if (!WAIT_ID.test(id) || id.startsWith('sim-')) return res.status(400).json({ error: 'Identificador inválido.' });
+    if (lat === null || lng === null || Math.abs(lat) > 90 || Math.abs(lng) > 180) return res.status(400).json({ error: 'Ubicación inválida.' });
+    const r = live.setWaiting(id, Number(req.body.routeId), lat, lng, req.body.dir === 1 ? 1 : 0);
+    if (r.error) return res.status(400).json(r);
+    res.json(r);
+  });
+
+  app.post('/api/waiting/cancel', (req, res) => {
+    const id = String(req.body.id || '');
+    if (WAIT_ID.test(id) && !id.startsWith('sim-')) live.cancelWaiting(id);
+    res.json({ ok: true });
+  });
+
   // ---------- Reportes ciudadanos ----------
   app.post('/api/reports', requireRole(), (req, res) => {
     const reason = str(req.body.reason, 40);

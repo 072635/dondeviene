@@ -1,5 +1,6 @@
 // Mapa con Leaflet + OpenStreetMap: trazo de la ruta, paradas y unidades en vivo.
 import { esc, API_BASE, getToken } from './ui.js';
+import { makeRoute } from './geo.js';
 
 const L = window.L;
 
@@ -13,10 +14,12 @@ export function createMap(el, route, { onStopClick } = {}) {
   const css = getComputedStyle(document.documentElement);
   const accent = css.getPropertyValue('--accent').trim() || '#9D2449';
   let line = null, stopLayer = L.layerGroup().addTo(map);
+  const waitLayer = L.layerGroup().addTo(map);
   const buses = new Map();
-  let selected = null;
+  let selected = null, geo = null, meMarker = null, meRing = null;
 
   function setRoute(r) {
+    geo = makeRoute(r.path, r.stops);
     // El mapa necesita una vista antes de dibujar capas.
     map.fitBounds(L.latLngBounds(r.path), { padding: [24, 24] });
     line?.remove();
@@ -56,9 +59,31 @@ export function createMap(el, route, { onStopClick } = {}) {
     for (const [id, m] of buses) if (!seen.has(id)) { m.remove(); buses.delete(id); }
   }
 
+  // Puntos donde alguien espera (anónimos, sobre la ruta).
+  function setWaiting(list = []) {
+    waitLayer.clearLayers();
+    for (const w of list) {
+      L.circleMarker(geo.pointAt(w.d), { radius: 7, color: '#6F1A33', weight: 2, fillColor: '#E3BC7A', fillOpacity: 1 })
+        .bindTooltip('Alguien espera aquí').addTo(waitLayer);
+    }
+  }
+
+  // Ubicación del propio pasajero.
+  function setMe(lat, lng, accuracy, { center = false } = {}) {
+    if (lat == null) { meMarker?.remove(); meRing?.remove(); meMarker = meRing = null; return; }
+    if (!meMarker) {
+      meRing = L.circle([lat, lng], { radius: accuracy || 30, color: '#1E6FD9', weight: 1, fillOpacity: 0.12 }).addTo(map);
+      meMarker = L.circleMarker([lat, lng], { radius: 8, color: '#FFFFFF', weight: 3, fillColor: '#1E6FD9', fillOpacity: 1 })
+        .bindTooltip('Tú').addTo(map);
+    } else {
+      meMarker.setLatLng([lat, lng]); meRing.setLatLng([lat, lng]); meRing.setRadius(accuracy || 30);
+    }
+    if (center) map.setView([lat, lng], Math.max(map.getZoom(), 15));
+  }
+
   setRoute(route);
   setTimeout(() => map.invalidateSize(), 50);
-  return { map, setRoute, setBuses, selectStop, destroy: () => map.remove() };
+  return { map, setRoute, setBuses, setWaiting, setMe, selectStop, destroy: () => map.remove() };
 }
 
 // Conexión en vivo a una ruta (Server-Sent Events) con reconexión automática del navegador.

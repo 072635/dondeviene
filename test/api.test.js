@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openDb, seed } from '../server/db.js';
 import { Live, Simulator } from '../server/live.js';
 import { createApp } from '../server/app.js';
-import { makeRoute, etaTo, gapsFor } from '../public/js/geo.js';
+import { makeRoute, etaTo, etaToPoint, gapsFor } from '../public/js/geo.js';
 import { SEED_ROUTE } from '../server/seed-data.js';
 
 let server, base, live;
@@ -185,4 +185,58 @@ test('geometría: proyección, tiempo de llegada y separación', () => {
   const g = gapsFor(r, bus, [bus, { id: 2, s: bus.s + 1260 }, { id: 3, s: bus.s - 3780 }]);
   assert.equal(g.ahead.unit.id, 2);
   assert.equal(g.behind.unit.id, 3);
+});
+
+test('pasajero esperando: aviso anónimo, conductor lo ve adelante y se borra al pasar la unidad', async () => {
+  const anon = client();
+  const id = 'pasajeroPrueba_0123456789';
+  // Un punto entre Playa Caracol y Punta Cancún, a pie de la ruta.
+  const spot = SEED_ROUTE.path[11];
+  assert.equal((await anon('/waiting', { method: 'POST', body: { id: 'corto', routeId: 1, lat: spot[0], lng: spot[1], dir: 0 } })).status, 400);
+  assert.equal((await anon('/waiting', { method: 'POST', body: { id, routeId: 1, lat: 21.30, lng: -86.80, dir: 0 } })).status, 400); // lejos de la ruta
+  const ok = await anon('/waiting', { method: 'POST', body: { id, routeId: 1, lat: spot[0], lng: spot[1], dir: 0 } });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.data.d > 8000 && ok.data.d < 10000, `d = ${ok.data.d}`);
+  assert.equal(live.snapshot(1).waiting.length, 1);
+  assert.equal(live.snapshot(1).waiting[0].lat, undefined); // nunca se comparte la coordenada exacta
+
+  // Un conductor de ida antes de ese punto lo ve en "gente esperando adelante".
+  const a = client();
+  await a('/auth/login', { method: 'POST', body: { email: 'admin@test.mx', password: 'admin-secreto' } });
+  await a('/admin/users', { method: 'POST', body: { name: 'Espera', email: 'espera@test.mx', password: 'secreto123', role: 'conductor', unitId: 4 } });
+  const d = client();
+  await d('/auth/login', { method: 'POST', body: { email: 'espera@test.mx', password: 'secreto123' } });
+  await d('/driver/shift/start', { method: 'POST', body: {} });
+  const t0 = Date.now() - 10 * 60e3;
+  let st;
+  for (let i = 6; i <= 9; i++) {
+    st = await d('/driver/position', { method: 'POST', body: { lat: SEED_ROUTE.path[i][0], lng: SEED_ROUTE.path[i][1], accuracy: 8, ts: t0 + (i - 6) * 60e3 } });
+  }
+  assert.equal(st.data.status.waitingAhead.length, 1);
+  assert.ok(st.data.status.waitingAhead[0].km > 0);
+
+  // La unidad pasa por el punto: el aviso se borra y el pasajero queda como atendido.
+  await d('/driver/position', { method: 'POST', body: { lat: SEED_ROUTE.path[12][0], lng: SEED_ROUTE.path[12][1], accuracy: 8, ts: t0 + 5 * 60e3 } });
+  live.pruneWaiting();
+  assert.equal(live.snapshot(1).waiting.length, 0);
+  const again = await anon('/waiting', { method: 'POST', body: { id, routeId: 1, lat: spot[0], lng: spot[1], dir: 0 } });
+  assert.equal(again.data.served, true);
+  await d('/driver/shift/end', { method: 'POST', body: {} });
+
+  // Cancelar quita el aviso.
+  const id2 = 'otroPasajero_0123456789ab';
+  await anon('/waiting', { method: 'POST', body: { id: id2, routeId: 1, lat: spot[0], lng: spot[1], dir: 1 } });
+  assert.equal(live.snapshot(1).waiting.length, 1);
+  await anon('/waiting/cancel', { method: 'POST', body: { id: id2 } });
+  assert.equal(live.snapshot(1).waiting.length, 0);
+});
+
+test('geometría: llegada a un punto cualquiera de la ruta', () => {
+  const r = makeRoute(SEED_ROUTE.path, SEED_ROUTE.stops);
+  const bus = { s: 5000 };
+  assert.ok(Math.abs(etaToPoint(r, bus, 6000, 0).rel - 1000) < 1);
+  // De regreso, el mismo punto queda casi una vuelta completa después.
+  assert.ok(etaToPoint(r, bus, 6000, 1).rel > r.L);
+  // Cerca de la terminal de inicio todos los camiones van de ida.
+  assert.equal(etaToPoint(r, { s: 0 }, 50, 1).rel, 0);
 });

@@ -20,7 +20,7 @@ export async function mount(view) {
 
   // Avisos en vivo para administración (emergencias, incidentes, reportes).
   const unsub = subscribe(route.id, {
-    snapshot: (s) => mapCtl?.setBuses(s.units),
+    snapshot: (s) => { mapCtl?.setBuses(s.units); mapCtl?.setWaiting(s.waiting); },
     event: (e) => {
       if (e.level === 'crit') toast(`⚠ ${e.text}`, 20000);
       if (tab === 'events') renderEvents();
@@ -59,11 +59,11 @@ export async function mount(view) {
         <div class="kpi hl"><span class="label">Km recorridos hoy</span><b>${k.kmToday.toFixed(1)}</b><span class="sub">${k.kmReal.toFixed(1)} km de turnos reales</span></div>
         <div class="kpi"><span class="label">Reportes ciudadanos</span><b>${k.reportsToday}</b><span class="sub">hoy</span></div>
         <div class="kpi ${k.openAlerts ? 'alert' : ''}"><span class="label">Avisos abiertos</span><b>${k.openAlerts}</b><span class="sub">incidentes y emergencias</span></div>
-        <div class="kpi"><span class="label">Intervalo ideal</span><b>${H}<small style="font-size:18px"> min</small></b><span class="sub">según unidades en servicio</span></div>
+        <div class="kpi"><span class="label">Esperando ahora</span><b>${ov.waitingNow}</b><span class="sub">personas que avisaron en la ruta</span></div>
       </div>
       <div class="card">
         <h3 style="font-family:var(--font-display);font-size:21px">Separación entre unidades</h3>
-        <p class="sub" style="margin:0">Minutos entre cada unidad y la que va adelante.</p>
+        <p class="sub" style="margin:0">Minutos entre cada unidad y la que va adelante. Intervalo ideal: ${H} min.</p>
         ${ov.pairs.length ? `<div class="bars">${ov.pairs.map((p) => {
           const stc = p.minutes < H * 0.5 ? 'full' : p.minutes > H * 1.5 ? 'mid' : 'ok';
           const word = stc === 'full' ? 'pegadas' : stc === 'mid' ? 'hueco' : 'bien';
@@ -93,9 +93,9 @@ export async function mount(view) {
 
   // ---------- Mapa ----------
   function renderMap() {
-    $('#aView').innerHTML = `<div class="map" id="aMap" style="height:70vh"></div><p class="sub">Las unidades grises no han enviado señal en más de 2 minutos.</p>`;
+    $('#aView').innerHTML = `<div class="map" id="aMap" style="height:70vh"></div><p class="sub">Las unidades grises no han enviado señal en más de 2 minutos. Los puntos dorados son personas que avisaron que están esperando.</p>`;
     mapCtl = createMap($('#aMap'), route);
-    api(`/admin/overview?route=${route.id}`).then((ov) => mapCtl?.setBuses(ov.units)).catch(() => {});
+    api(`/admin/overview?route=${route.id}`).then((ov) => { mapCtl?.setBuses(ov.units); mapCtl?.setWaiting(ov.waiting); }).catch(() => {});
   }
 
   // ---------- Avisos ----------

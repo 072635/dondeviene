@@ -64,6 +64,21 @@ export function loopPos(route, d, dir) {
   return dir === 0 ? d : route.LOOP - d;
 }
 
+// Posición en el ciclo de un punto cualquiera de la ruta (d metros desde el inicio).
+// Cerca de las terminales el sentido se fija solo: al inicio todos van de ida, al final de regreso.
+export function pointLoopPos(route, d, dir) {
+  if (d < 120) return 0;
+  if (d > route.L - 120) return route.L;
+  return dir === 0 ? d : route.LOOP - d;
+}
+
+// Tiempo estimado (s) para que una unidad llegue a un punto de la ruta. Las combis paran donde
+// les hacen la parada, así que el punto puede ser la ubicación exacta del pasajero.
+export function etaToPoint(route, unit, d, dir) {
+  const rel = mod(pointLoopPos(route, d, dir) - unit.s, route.LOOP);
+  return { rel, eta: rel < 30 ? 0 : rel / VEFF };
+}
+
 // Tiempo estimado (s) para que una unidad llegue a la parada k en el sentido dir.
 export function etaTo(route, unit, k, dir) {
   const rel = mod(stopLoopPos(route, k, dir) - unit.s, route.LOOP);

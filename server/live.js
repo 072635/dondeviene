@@ -1,8 +1,11 @@
-import { makeRoute, haversine, gapsFor, headway, loopPos, nearestStop, mod } from '../public/js/geo.js';
+import { makeRoute, haversine, gapsFor, headway, loopPos, pointLoopPos, nearestStop, mod } from '../public/js/geo.js';
 
 const STALE_MS = 2 * 60e3;   // sin señal
 const DROP_MS = 10 * 60e3;   // se oculta del mapa
 const TERMINAL_M = 120;
+const WAIT_TTL_MS = 3 * 60e3;   // el pasajero renueva su aviso cada minuto; sin renovar, se borra
+const WAIT_MAX_OFF_M = 500;     // más lejos de la ruta no cuenta como esperando en ella
+const SERVED_TTL_MS = 10 * 60e3;
 
 // Estado en vivo de las unidades, transmisión por SSE y simulador de demostración.
 export class Live {
@@ -10,6 +13,9 @@ export class Live {
     this.db = db;
     this.routes = new Map();
     this.units = new Map(); // unitId -> estado
+    // Pasajeros esperando: anónimos, solo el punto sobre la ruta y el sentido (nunca su nombre ni su coordenada exacta).
+    this.waiting = new Map(); // id del teléfono -> { routeId, d, dir, s, ts, sim }
+    this.served = new Map();  // id -> { at, number }: ya pasó una unidad por su punto
     this.clients = new Set();
     this.pending = new Map();
     this.sim = null;
@@ -61,6 +67,7 @@ export class Live {
 
   applyFix(st, lat, lng, ts, accuracy, countKm = true) {
     const r = this.route(st.routeId).geo;
+    const prevS = st.hasFix ? st.s : null;
     const { d, off } = r.project(lat, lng);
     if (st.hasFix) {
       const dist = haversine([st.lat, st.lng], [lat, lng]);
@@ -75,6 +82,27 @@ export class Live {
     if (d < TERMINAL_M) { st.dir = 0; this.terminal(st, 'A'); }
     else if (d > r.L - TERMINAL_M) { st.dir = 1; this.terminal(st, 'B'); }
     Object.assign(st, { lat, lng, d, off, offRoute: off > 300, s: loopPos(r, d, st.dir), ts, accuracy, hasFix: true });
+    if (prevS !== null) this.servePassed(st, prevS);
+  }
+
+  // Marca como atendidos a los pasajeros que esperaban en el tramo que la unidad acaba de recorrer
+  // (de su posición anterior a la actual), aunque el GPS haya brincado de un punto a otro.
+  servePassed(st, prevS) {
+    if (st.occ === 'llena' || st.offRoute) return;
+    const r = this.route(st.routeId);
+    const moved = mod(st.s - prevS, r.geo.LOOP);
+    if (moved > r.geo.LOOP / 2) return; // salto hacia atrás o lectura mala del GPS
+    const now = Date.now();
+    let any = false;
+    for (const [id, w] of this.waiting) {
+      if (w.routeId !== st.routeId) continue;
+      if (mod(w.s - prevS, r.geo.LOOP) <= moved + 40) {
+        this.waiting.delete(id);
+        if (!w.sim) this.served.set(id, { at: now, number: st.number });
+        any = true;
+      }
+    }
+    if (any) this.broadcast(st.routeId);
   }
 
   terminal(st, which) {
@@ -103,6 +131,47 @@ export class Live {
     this.broadcast(st.routeId);
   }
 
+  // ---- Pasajeros esperando ----
+  setWaiting(id, routeId, lat, lng, dir, { sim = false } = {}) {
+    const r = this.route(routeId);
+    if (!r) return { error: 'Ruta no encontrada.' };
+    const served = this.served.get(id);
+    if (served) return { served: true, number: served.number };
+    const { d, off } = r.geo.project(lat, lng);
+    if (off > WAIT_MAX_OFF_M) return { error: 'Estás muy lejos de la ruta para avisar que esperas.' };
+    const dd = Math.round(d / 25) * 25; // se redondea para no revelar la posición exacta
+    const w = { routeId: r.id, d: dd, dir, s: pointLoopPos(r.geo, dd, dir), ts: Date.now(), sim };
+    this.waiting.set(id, w);
+    this.broadcast(r.id);
+    return { d: dd, off: Math.round(off) };
+  }
+
+  cancelWaiting(id) {
+    const w = this.waiting.get(id);
+    if (!w) return;
+    this.waiting.delete(id);
+    this.broadcast(w.routeId);
+  }
+
+  waitingOf(routeId) {
+    return [...this.waiting.values()].filter((w) => w.routeId === Number(routeId));
+  }
+
+  // Quita los avisos viejos y los de los puntos por donde ya pasó una unidad.
+  pruneWaiting() {
+    const now = Date.now();
+    const touched = new Set();
+    for (const [id, w] of this.waiting) {
+      const r = this.route(w.routeId);
+      const passer = r && this.unitsOf(w.routeId, { includeStale: false })
+        .find((u) => mod(u.s - w.s, r.geo.LOOP) < 80 && u.occ !== 'llena');
+      if (passer) this.served.set(id, { at: now, number: passer.number });
+      if (passer || now - w.ts > WAIT_TTL_MS) { this.waiting.delete(id); touched.add(w.routeId); }
+    }
+    for (const [id, sv] of this.served) if (now - sv.at > SERVED_TTL_MS) this.served.delete(id);
+    for (const id of touched) this.broadcast(id);
+  }
+
   // ---- Lecturas ----
   unitsOf(routeId, { includeStale = true } = {}) {
     const now = Date.now();
@@ -119,7 +188,11 @@ export class Live {
   }
 
   snapshot(routeId) {
-    return { routeId: Number(routeId), t: Date.now(), units: this.unitsOf(routeId).map((u) => this.publicUnit(u)) };
+    return {
+      routeId: Number(routeId), t: Date.now(),
+      units: this.unitsOf(routeId).map((u) => this.publicUnit(u)),
+      waiting: this.waitingOf(routeId).map((w) => ({ d: w.d, dir: w.dir })),
+    };
   }
 
   driverStatus(unitId) {
@@ -130,10 +203,19 @@ export class Live {
     const g = st.hasFix ? gapsFor(r.geo, { id: st.unitId, s: st.s }, all.map((u) => ({ id: u.unitId, number: u.number, s: u.s }))) : { ahead: null, behind: null };
     const H = headway(r.geo, Math.max(1, all.length));
     const fmt = (x) => x && { number: x.unit.number, minutes: Math.round(x.t / 60), km: +(x.dist / 1000).toFixed(1) };
+    // Gente esperando en los próximos 8 km de su recorrido, antes que la unidad de adelante.
+    const limit = Math.min(8000, g.ahead ? g.ahead.dist : Infinity);
+    const waitingAhead = st.hasFix ? this.waitingOf(st.routeId)
+      .map((w) => ({ w, dist: mod(w.s - st.s, r.geo.LOOP) }))
+      .filter((x) => x.dist > 30 && x.dist <= limit)
+      .sort((a, b) => a.dist - b.dist)
+      .map((x) => ({ km: +(x.dist / 1000).toFixed(1), minutes: Math.max(1, Math.round(x.dist / 6.3 / 60)), nearStop: r.stops[nearestStop(r.geo, x.w.d)]?.name }))
+      : [];
     return {
       hasFix: st.hasFix, dir: st.dir, nearStop: st.hasFix ? r.stops[nearestStop(r.geo, st.d)]?.name : null,
       offRoute: st.offRoute, occ: st.occ, km: +(st.km / 1000).toFixed(1), trips: st.trips,
       ahead: fmt(g.ahead), behind: fmt(g.behind), headwayMin: Math.round(H / 60), lastFix: st.ts, accuracy: st.accuracy,
+      waitingAhead,
     };
   }
 
@@ -151,6 +233,8 @@ export class Live {
       headwayMin: Math.round(H / 60),
       compliance: pairs.length ? Math.round((ok / pairs.length) * 100) : null,
       pairs,
+      waitingNow: this.waitingOf(routeId).length,
+      waiting: this.waitingOf(routeId).map((w) => ({ d: w.d, dir: w.dir, nearStop: r.stops[nearestStop(r.geo, w.d)]?.name, sim: w.sim })),
       units: units.map((u) => ({
         ...this.publicUnit(u), km: +(u.km / 1000).toFixed(1), trips: u.trips,
         nearStop: r.stops[nearestStop(r.geo, u.d)]?.name, shiftId: u.shiftId,
@@ -187,6 +271,7 @@ export class Live {
   }
 
   housekeeping() {
+    this.pruneWaiting();
     for (const [id] of this.routes) this.broadcast(id);
     for (const c of this.clients) c.res.write(': ping\n\n');
   }
@@ -239,6 +324,7 @@ export class Simulator {
   }
 
   place(st, r) {
+    const prevS = st.d === undefined || st.lat === undefined ? null : mod(st.prevS ?? st.s, r.geo.LOOP);
     const s = mod(st.s, r.geo.LOOP);
     st.s = s;
     st.dir = s <= r.geo.L ? 0 : 1;
@@ -247,6 +333,8 @@ export class Simulator {
     const ratio = st.occN / 40;
     st.occ = ratio < 0.45 ? 'vacia' : ratio < 0.85 ? 'media' : 'llena';
     st.ts = Date.now();
+    if (prevS !== null) this.live.servePassed(st, prevS);
+    st.prevS = st.s;
   }
 
   tick(dt) {
@@ -271,6 +359,17 @@ export class Simulator {
       this.place(st, r);
       touched.add(st.routeId);
     }
+    // Pasajeros de demostración: mantiene unos cuantos esperando en puntos al azar de la ruta.
+    for (const [routeId, r] of this.live.routes) {
+      const simWaiting = [...this.live.waiting.entries()].filter(([, w]) => w.sim && w.routeId === routeId);
+      if (simWaiting.length < 6 && Math.random() < Math.min(1, dt / 40)) {
+        const d = 300 + Math.random() * (r.geo.L - 600);
+        const [lat, lng] = r.geo.pointAt(d);
+        const id = `sim-${routeId}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+        this.live.setWaiting(id, routeId, lat, lng, Math.random() < 0.5 ? 0 : 1, { sim: true });
+      }
+      for (const [id, w] of simWaiting) w.ts = Date.now(); // los simulados esperan hasta que pase una unidad
+    }
     for (const id of touched) this.live.broadcast(id);
   }
 
@@ -284,6 +383,7 @@ export class Simulator {
   stop() {
     clearInterval(this.timer);
     this.timer = null;
+    for (const [id, w] of this.live.waiting) if (w.sim) this.live.cancelWaiting(id);
     for (const id of this.ids) {
       const st = this.live.units.get(id);
       if (st?.sim) { this.live.units.delete(id); this.live.broadcast(st.routeId); }

@@ -1,18 +1,37 @@
 import { $, $$, api, esc, toast, fmtMin, adviceHTML, store } from './ui.js';
 import { t } from './i18n.js';
-import { makeRoute, etaTo } from './geo.js';
+import { makeRoute, etaToPoint, nearestStop } from './geo.js';
 import { createMap, subscribe } from './map.js';
 
 const REASONS = ['no_se_detuvo', 'manejo_peligroso', 'cobro_incorrecto', 'sin_aire_sucia', 'mal_trato', 'otro'];
+const WAIT_REFRESH_MS = 60e3;
+const TERMINAL_M = 120;
+
+// Identificador anónimo de este teléfono para el aviso de "estoy esperando" (no está ligado a la cuenta).
+function waitId() {
+  let id = store('dv-wid');
+  if (!id || !/^[A-Za-z0-9_-]{16,64}$/.test(id)) {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    id = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    store('dv-wid', id);
+  }
+  return id;
+}
 
 export async function mount(view, { user }) {
   const { routes } = await api('/routes');
   if (!routes.length) { view.innerHTML = '<div class="page"><div class="empty">Aún no hay rutas registradas.</div></div>'; return () => {}; }
 
+  // mode 'gps': el punto es la ubicación del pasajero (las combis paran donde les hacen la parada).
+  // mode 'stop': el pasajero elige una parada de la lista.
   const st = {
     route: routes.find((r) => String(r.id) === store('dv-route')) || routes[0],
+    mode: store('dv-mode') === 'stop' ? 'stop' : 'gps',
     stop: Number(store('dv-stop') ?? 5), dir: Number(store('dv-dir') ?? 0),
+    me: null, gpsMsg: '', watch: null, centered: false,
     units: [], notify: null, reason: null, online: true,
+    wait: { on: false, timer: null, msg: '' },
   };
   let geo, mapCtl, unsub;
 
@@ -26,12 +45,20 @@ export async function mount(view, { user }) {
       <div class="stack">
         <div class="card">
           ${routes.length > 1 ? `<div class="field"><label class="label" for="pRoute">Ruta</label><select id="pRoute">${routes.map((r) => `<option value="${r.id}">${esc(r.code)} · ${esc(r.name)}</option>`).join('')}</select></div>` : `<div class="drv-head"><span class="sign">${esc(st.route.code)}</span><b>${esc(st.route.name)}</b></div>`}
-          <div class="field"><label class="label" for="pStop">${esc(t('whereAt'))}</label><select id="pStop"></select></div>
+          <div class="field"><span class="label">${esc(t('whereAt'))}</span>
+            <div class="two" role="group"><button type="button" class="opt" id="pModeGps"></button><button type="button" class="opt" id="pModeStop"></button></div>
+          </div>
+          <p class="sub" id="pWhere" style="margin:0" aria-live="polite"></p>
+          <div class="field" id="pStopField"><label class="sub" for="pStop">${esc(t('modeStop'))}</label><select id="pStop"></select></div>
           <div class="field"><span class="label">${esc(t('whereTo'))}</span>
             <div class="two" role="group"><button type="button" class="opt" id="pDir0"></button><button type="button" class="opt" id="pDir1"></button></div>
           </div>
         </div>
         <div class="card" aria-live="polite" id="pNext"></div>
+        <div class="card" id="pWaitCard">
+          <button type="button" class="btn small" id="pWait"></button>
+          <p class="sub" id="pWaitMsg" style="margin:0"></p>
+        </div>
         <div class="card">
           <p class="label">${esc(t('reportT'))}</p>
           ${user ? `
@@ -44,6 +71,83 @@ export async function mount(view, { user }) {
       </div>
     </div>
   </div>`;
+  $('#pModeGps').textContent = t('modeGps');
+  $('#pModeStop').textContent = t('modeStop');
+
+  // ---------- Punto del pasajero ----------
+  // Devuelve el punto sobre la ruta donde el pasajero espera: { d, lat, lng, label, stopIdx }.
+  function target() {
+    if (st.mode === 'stop') {
+      const s = st.route.stops[st.stop];
+      return { d: geo.stopD[st.stop], lat: s.lat, lng: s.lng, label: s.name, stopIdx: st.stop };
+    }
+    if (!st.me) return null;
+    return { d: st.me.d, lat: st.me.lat, lng: st.me.lng, label: t('yourPoint'), stopIdx: nearestStop(geo, st.me.d) };
+  }
+
+  function effectiveDir(d) {
+    if (d < TERMINAL_M) return 0;
+    if (d > geo.L - TERMINAL_M) return 1;
+    return st.dir;
+  }
+
+  function renderPlace() {
+    const gps = st.mode === 'gps';
+    $('#pModeGps').setAttribute('aria-pressed', gps); $('#pModeStop').setAttribute('aria-pressed', !gps);
+    $('#pStopField').hidden = gps;
+    const n = st.route.stops.length;
+    const a = st.route.stops[0].name, b = st.route.stops[n - 1].name;
+    $('#pDir0').textContent = t('toB', { b }); $('#pDir1').textContent = t('toA', { a });
+    const tg = target();
+    const dir = tg ? effectiveDir(tg.d) : st.dir;
+    $('#pDir0').setAttribute('aria-pressed', dir === 0); $('#pDir1').setAttribute('aria-pressed', dir === 1);
+    $('#pDir0').disabled = !!tg && tg.d > geo.L - TERMINAL_M; $('#pDir1').disabled = !!tg && tg.d < TERMINAL_M;
+    let where = '';
+    if (gps) {
+      if (st.gpsMsg) where = st.gpsMsg;
+      else if (!st.me) where = t('locating');
+      else {
+        const near = st.route.stops[nearestStop(geo, st.me.d)].name;
+        where = st.me.off > 300 ? t('farRoute', { km: (st.me.off / 1000).toFixed(1), stop: near }) : t('nearRoute', { stop: near, m: Math.round(st.me.off) });
+      }
+    }
+    $('#pWhere').textContent = where;
+    $('#pWhere').hidden = !gps;
+    mapCtl.selectStop(gps ? -1 : st.stop, st.route);
+  }
+
+  function setMode(mode) {
+    st.mode = mode; store('dv-mode', mode);
+    st.notify = null;
+    if (mode === 'gps') startGps(); else stopGps();
+    renderPlace(); renderNext(); if (st.wait.on) sendWaiting();
+  }
+
+  function startGps() {
+    if (st.watch !== null) return;
+    if (!('geolocation' in navigator)) { st.gpsMsg = t('gpsNone'); return; }
+    st.gpsMsg = '';
+    st.watch = navigator.geolocation.watchPosition((pos) => {
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+      const { d, off } = geo.project(lat, lng);
+      const first = !st.me;
+      st.me = { lat, lng, accuracy, d, off };
+      st.gpsMsg = '';
+      mapCtl.setMe(lat, lng, accuracy, { center: !st.centered });
+      st.centered = true;
+      renderPlace(); renderNext();
+      if (st.wait.on && first) sendWaiting();
+    }, (err) => {
+      st.gpsMsg = err.code === 1 ? t('gpsDenied') : t('gpsNone');
+      renderPlace(); renderNext();
+    }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+  }
+
+  function stopGps() {
+    if (st.watch !== null) navigator.geolocation.clearWatch(st.watch);
+    st.watch = null; st.me = null; st.centered = false;
+    mapCtl.setMe(null);
+  }
 
   function setRoute(r) {
     st.route = r; store('dv-route', String(r.id));
@@ -52,46 +156,56 @@ export async function mount(view, { user }) {
     $('#pStop').innerHTML = r.stops.map((s, k) => `<option value="${k}">${esc(s.km ? s.km + ' · ' : '')}${esc(s.name)}</option>`).join('');
     $('#pStop').value = st.stop;
     if (user) $('#rUnit').innerHTML = r.units.map((u) => `<option value="${u.id}">${esc(t('unit'))} ${esc(u.number)}</option>`).join('');
-    if (mapCtl) mapCtl.setRoute(r); else mapCtl = createMap($('#pMap'), r, { onStopClick: selectStop });
+    if (mapCtl) mapCtl.setRoute(r); else mapCtl = createMap($('#pMap'), r, { onStopClick: (k) => { selectStop(k); if (st.mode !== 'stop') setMode('stop'); } });
+    if (st.me) { const p = geo.project(st.me.lat, st.me.lng); Object.assign(st.me, p); }
     unsub?.();
     st.units = [];
     unsub = subscribe(r.id, {
-      snapshot: (s) => { st.units = s.units; mapCtl.setBuses(s.units); renderNext(); },
+      snapshot: (s) => { st.units = s.units; mapCtl.setBuses(s.units); mapCtl.setWaiting(s.waiting); renderNext(); },
       status: (ok) => { st.online = ok; $('#pLive').textContent = ok ? `● ${t('live')}` : t('reconnecting'); $('#pLive').classList.toggle('live-on', ok); },
     });
-    selectStop(st.stop);
+    renderPlace(); renderNext();
   }
 
   function selectStop(k) {
     st.stop = k; store('dv-stop', String(k));
     $('#pStop').value = k;
-    const n = st.route.stops.length;
-    if (k === 0) st.dir = 0;
-    if (k === n - 1) st.dir = 1;
-    store('dv-dir', String(st.dir));
-    const a = st.route.stops[0].name, b = st.route.stops[n - 1].name;
-    $('#pDir0').textContent = t('toB', { b }); $('#pDir1').textContent = t('toA', { a });
-    $('#pDir0').setAttribute('aria-pressed', st.dir === 0); $('#pDir1').setAttribute('aria-pressed', st.dir === 1);
-    $('#pDir0').disabled = k === n - 1; $('#pDir1').disabled = k === 0;
-    mapCtl.selectStop(k, st.route);
     st.notify = null;
-    renderNext();
+    renderPlace(); renderNext();
+    if (st.wait.on) sendWaiting();
   }
 
+  function setDir(dir) {
+    st.dir = dir; store('dv-dir', String(dir));
+    st.notify = null;
+    renderPlace(); renderNext();
+    if (st.wait.on) sendWaiting();
+  }
+
+  // ---------- Próximas unidades ----------
   const pill = (l) => `<span class="pill ${l}"><i></i>${esc(t(l))}</span>`;
   const accTag = (u) => (u.accessible ? `<span class="acc">♿ ${esc(t('acc'))}</span>` : '');
 
   function etas() {
+    const tg = target();
+    if (!tg) return null;
+    const dir = effectiveDir(tg.d);
     return st.units.filter((u) => !u.stale && !u.offRoute)
-      .map((u) => ({ u, ...etaTo(geo, u, st.stop, st.dir) }))
+      .map((u) => ({ u, ...etaToPoint(geo, u, tg.d, dir) }))
       .sort((a, b) => a.eta - b.eta);
   }
 
   function renderNext() {
     const box = $('#pNext');
     const list = etas();
+    if (!list) {
+      box.innerHTML = `<p class="label">${esc(t('nextBus'))}</p><div class="empty">${esc(st.gpsMsg || t('locating'))}</div>`;
+      renderWait();
+      return;
+    }
     if (!list.length) {
       box.innerHTML = `<p class="label">${esc(t('nextBus'))}</p><div class="empty">${esc(t('noBuses'))}</div>`;
+      renderWait();
       return;
     }
     const n = list[0];
@@ -103,25 +217,27 @@ export async function mount(view, { user }) {
     else if (free !== n) a = adviceHTML('warn', 'i', t('nextFull'), t('nextFullNear', { u: free.u.number, m: fmtMin(free.eta) }));
     else if (fmtMin(n.eta) > 15) a = adviceHTML('warn', 'i', t('wait'), t('waitB', { m: fmtMin(n.eta) }));
     else a = adviceHTML('good', '✓', t('good'), t('goodB', { u: n.u.number }));
+    const atLabel = st.mode === 'gps' ? t('atPoint') : t('atStop');
     box.innerHTML = `
       <p class="label">${esc(t('nextBus'))}</p>
       <div class="next">
         <span class="unit">${esc(t('unit'))} ${esc(n.u.number)}</span>
         <div><div class="eta">${arriving ? esc(t('arriving')) : `${fmtMin(n.eta)}<small>min</small>`}</div>
-          <div class="sub">${esc(arriving ? t('atStop') : t('kmAway', { km: (n.rel / 1000).toFixed(1) }))}${accTag(n.u)}</div></div>
+          <div class="sub">${esc(arriving ? atLabel : t('kmAway', { km: (n.rel / 1000).toFixed(1) }))}${accTag(n.u)}</div></div>
         ${pill(n.u.occ)}
       </div>
       <div class="list">${list.slice(1, 3).map((x) => `<div class="lrow"><span class="unit">${esc(x.u.number)}</span><span><b>${fmtMin(x.eta)} min</b> <span class="sub">· ${(x.rel / 1000).toFixed(1)} km</span>${accTag(x.u)}</span>${pill(x.u.occ)}</div>`).join('')}</div>
       ${a}
       <button type="button" class="ghost" id="pNotify" aria-pressed="${!!st.notify}">${esc(st.notify ? t('notifyOn', { u: st.notify.number }) : t('notify'))}</button>
-      <p class="sub" style="margin:0">${esc(t('freq', { n: list.length }))}</p>`;
+      <p class="sub" style="margin:0">${esc(list.length === 1 ? t('freq1') : t('freq', { n: list.length }))}</p>`;
     $('#pNotify').onclick = toggleNotify;
     checkNotify(list);
+    renderWait();
   }
 
   async function toggleNotify() {
     if (st.notify) { st.notify = null; renderNext(); return; }
-    const list = etas();
+    const list = etas() || [];
     const c = list.find((x) => x.eta > 180) || list[0];
     if (!c) return;
     st.notify = { id: c.u.id, number: c.u.number };
@@ -136,7 +252,7 @@ export async function mount(view, { user }) {
     const x = list.find((y) => y.u.id === st.notify.id);
     if (!x) return;
     if (x.eta <= 180) {
-      const msg = t('notifyMsg', { u: st.notify.number, s: st.route.stops[st.stop].name });
+      const msg = t('notifyMsg', { u: st.notify.number, s: target()?.label || '' });
       st.notify = null;
       toast(msg, 15000);
       if ('Notification' in window && Notification.permission === 'granted') {
@@ -147,11 +263,56 @@ export async function mount(view, { user }) {
     }
   }
 
-  // Eventos de la vista
+  // ---------- "Estoy esperando aquí" ----------
+  function renderWait() {
+    const btn = $('#pWait');
+    if (!btn) return;
+    const tg = target();
+    btn.disabled = !tg;
+    btn.textContent = st.wait.on ? t('waitOn') : t('waitBtn');
+    btn.className = st.wait.on ? 'ghost' : 'btn small';
+    btn.setAttribute('aria-pressed', st.wait.on);
+    $('#pWaitMsg').textContent = st.wait.msg || t('waitHint');
+  }
+
+  async function sendWaiting() {
+    const tg = target();
+    if (!tg) return;
+    try {
+      const r = await api('/waiting', { method: 'POST', body: { id: waitId(), routeId: st.route.id, lat: tg.lat, lng: tg.lng, dir: effectiveDir(tg.d) } });
+      if (r.served) {
+        stopWaiting(false);
+        st.wait.msg = t('waitServed', { u: r.number });
+        toast(st.wait.msg);
+      } else st.wait.msg = '';
+    } catch (e) {
+      if (!e.offline) { stopWaiting(false); st.wait.msg = e.message; }
+    }
+    renderWait();
+  }
+
+  function startWaiting() {
+    st.wait.on = true; st.wait.msg = '';
+    clearInterval(st.wait.timer);
+    st.wait.timer = setInterval(sendWaiting, WAIT_REFRESH_MS);
+    sendWaiting();
+  }
+
+  function stopWaiting(tellServer = true) {
+    st.wait.on = false;
+    clearInterval(st.wait.timer);
+    if (tellServer) api('/waiting/cancel', { method: 'POST', body: { id: waitId() } }).catch(() => {});
+    renderWait();
+  }
+
+  // ---------- Eventos ----------
+  $('#pModeGps').onclick = () => setMode('gps');
+  $('#pModeStop').onclick = () => setMode('stop');
   $('#pStop').onchange = (e) => selectStop(Number(e.target.value));
-  $('#pDir0').onclick = () => { st.dir = 0; selectStop(st.stop); };
-  $('#pDir1').onclick = () => { st.dir = 1; selectStop(st.stop); };
-  $('#pRoute')?.addEventListener('change', (e) => setRoute(routes.find((r) => r.id === Number(e.target.value))));
+  $('#pDir0').onclick = () => setDir(0);
+  $('#pDir1').onclick = () => setDir(1);
+  $('#pWait').onclick = () => { if (st.wait.on) { st.wait.msg = ''; stopWaiting(); } else startWaiting(); };
+  $('#pRoute')?.addEventListener('change', (e) => { if (st.wait.on) stopWaiting(); setRoute(routes.find((r) => r.id === Number(e.target.value))); });
   if (user) {
     $$('#rChips .chip').forEach((c) => c.onclick = () => {
       st.reason = c.dataset.r;
@@ -161,7 +322,9 @@ export async function mount(view, { user }) {
       const msg = $('#rMsg'); msg.hidden = false;
       if (!st.reason) { msg.className = 'error'; msg.textContent = t('pick'); return; }
       try {
-        await api('/reports', { method: 'POST', body: { unitId: Number($('#rUnit').value), reason: st.reason, comment: $('#rComment').value, stopId: st.route.stops[st.stop].id } });
+        const tg = target();
+        const stopIdx = tg ? tg.stopIdx : st.stop;
+        await api('/reports', { method: 'POST', body: { unitId: Number($('#rUnit').value), reason: st.reason, comment: $('#rComment').value, stopId: st.route.stops[stopIdx].id } });
         msg.className = 'okmsg'; msg.textContent = t('sent');
         st.reason = null; $('#rComment').value = '';
         $$('#rChips .chip').forEach((x) => x.setAttribute('aria-pressed', 'false'));
@@ -171,6 +334,11 @@ export async function mount(view, { user }) {
 
   setRoute(st.route);
   if ($('#pRoute')) $('#pRoute').value = st.route.id;
+  if (st.mode === 'gps') { startGps(); renderPlace(); renderNext(); }
   const tick = setInterval(renderNext, 15000);
-  return () => { clearInterval(tick); unsub?.(); mapCtl?.destroy(); };
+  return () => {
+    clearInterval(tick); stopGps();
+    if (st.wait.on) stopWaiting();
+    unsub?.(); mapCtl?.destroy();
+  };
 }
