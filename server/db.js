@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hashPassword } from './auth.js';
-import { SEED_ROUTE } from './seed-data.js';
+import { SEED_ROUTE, OLD_SEED_PATH } from './seed-data.js';
 
 export function openDb(file = process.env.DB_FILE || path.join(process.cwd(), 'data', 'dondeviene.db')) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -108,6 +108,14 @@ export function seed(db, { adminEmail, adminPassword, demo }) {
     SEED_ROUTE.stops.forEach((s, i) => ins.run(route.id, i, s.name, s.km, s.lat, s.lng));
     const insU = db.prepare('INSERT INTO units (number, route_id, accessible) VALUES (?, ?, ?)');
     for (const u of SEED_ROUTE.units) insU.run(u.number, route.id, u.accessible ? 1 : 0);
+  }
+
+  // Actualiza el trazo aproximado de la primera versión al trazo real del boulevard (con sus paradas).
+  const current = db.prepare('SELECT id, path FROM routes WHERE code = ?').get(SEED_ROUTE.code);
+  if (current && current.path === JSON.stringify(OLD_SEED_PATH)) {
+    db.prepare('UPDATE routes SET path = ? WHERE id = ?').run(JSON.stringify(SEED_ROUTE.path), current.id);
+    const upd = db.prepare('UPDATE stops SET name = ?, km = ?, lat = ?, lng = ? WHERE route_id = ? AND seq = ?');
+    SEED_ROUTE.stops.forEach((s, i) => upd.run(s.name, s.km, s.lat, s.lng, current.id, i));
   }
 
   const created = [];

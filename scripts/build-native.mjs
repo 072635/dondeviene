@@ -7,6 +7,10 @@ const out = path.join(root, 'www');
 fs.rmSync(out, { recursive: true, force: true });
 fs.cpSync(path.join(root, 'public'), out, { recursive: true });
 fs.cpSync(path.join(root, 'node_modules', 'leaflet', 'dist'), path.join(out, 'vendor', 'leaflet'), { recursive: true });
+fs.mkdirSync(path.join(out, 'vendor', 'maplibre'), { recursive: true });
+for (const f of ['maplibre-gl.js', 'maplibre-gl.css']) fs.copyFileSync(path.join(root, 'node_modules', 'maplibre-gl', 'dist', f), path.join(out, 'vendor', 'maplibre', f));
+fs.mkdirSync(path.join(out, 'vendor', 'maplibre-leaflet'), { recursive: true });
+fs.copyFileSync(path.join(root, 'node_modules', '@maplibre', 'maplibre-gl-leaflet', 'leaflet-maplibre-gl.js'), path.join(out, 'vendor', 'maplibre-leaflet', 'leaflet-maplibre-gl.js'));
 // El service worker es solo para la versión web.
 fs.rmSync(path.join(out, 'sw.js'), { force: true });
 // La app no se incluye a sí misma.

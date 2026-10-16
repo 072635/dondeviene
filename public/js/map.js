@@ -4,12 +4,29 @@ import { makeRoute } from './geo.js';
 
 const L = window.L;
 
+// Mapa base vectorial de OpenFreeMap (gratuito, sin clave, datos de OpenStreetMap). En teléfonos sin
+// WebGL se usa el mapa de mosaicos de OpenStreetMap como respaldo.
+function webglOk() {
+  try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch { return false; }
+}
+
+function addBaseMap(map) {
+  const osm = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+  if (window.maplibregl && L.maplibreGL && webglOk()) {
+    L.maplibreGL({
+      style: 'https://tiles.openfreemap.org/styles/liberty',
+      attribution: `<a href="https://openfreemap.org">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/">OpenMapTiles</a> ${osm}`,
+    }).addTo(map);
+    return;
+  }
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+    maxZoom: 19, subdomains: 'abc', attribution: `${osm} · OSM France`,
+  }).addTo(map);
+}
+
 export function createMap(el, route, { onStopClick } = {}) {
   const map = L.map(el, { zoomControl: true, attributionControl: true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; colaboradores de <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).addTo(map);
+  addBaseMap(map);
 
   const css = getComputedStyle(document.documentElement);
   const accent = css.getPropertyValue('--accent').trim() || '#9D2449';

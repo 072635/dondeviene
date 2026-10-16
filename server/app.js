@@ -459,6 +459,8 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
 
   // ---------- Archivos de la app ----------
   app.use('/vendor/leaflet', express.static(path.join(ROOT, 'node_modules', 'leaflet', 'dist'), { maxAge: '7d' }));
+  app.use('/vendor/maplibre', express.static(path.join(ROOT, 'node_modules', 'maplibre-gl', 'dist'), { maxAge: '7d' }));
+  app.use('/vendor/maplibre-leaflet', express.static(path.join(ROOT, 'node_modules', '@maplibre', 'maplibre-gl-leaflet'), { maxAge: '7d' }));
   app.use(express.static(path.join(ROOT, 'public'), { maxAge: 0 }));
   app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(ROOT, 'public', 'index.html')));
 

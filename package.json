@@ -16,8 +16,10 @@
     "@capacitor-community/background-geolocation": "^1.2.26",
     "@capacitor/core": "^8.5.3",
     "@capacitor/local-notifications": "^8.3.1",
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
     "express": "^5.1.0",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "maplibre-gl": "^4.7.1"
   },
   "type": "module",
   "engines": {
