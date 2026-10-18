@@ -91,3 +91,35 @@ export function makeLoginLimiter({ max = 10, windowMs = 15 * 60e3 } = {}) {
     reset(key) { hits.delete(key); },
   };
 }
+
+// Límite general de peticiones por IP (ventana fija). Frena abusos y bots que saturen la API.
+export function makeRateLimit({ max, windowMs = 60e3 }) {
+  const hits = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [k, h] of hits) if (now - h.start > windowMs) hits.delete(k);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const now = Date.now(), key = req.ip;
+    let h = hits.get(key);
+    if (!h || now - h.start > windowMs) { h = { start: now, count: 0 }; hits.set(key, h); }
+    if (++h.count > max) {
+      res.set('Retry-After', String(Math.ceil((h.start + windowMs - now) / 1000)));
+      return res.status(429).json({ error: 'Demasiadas peticiones. Espera un momento e inténtalo de nuevo.' });
+    }
+    next();
+  };
+}
+
+// Contraseñas que aparecen primero en las listas filtradas: se rechazan aunque tengan 8 caracteres.
+const COMMON = new Set(['12345678', '123456789', '1234567890', '87654321', '11111111', '00000000', '12341234', '11223344',
+  'password', 'password1', 'password123', 'contraseña', 'contrasena', 'qwerty123', 'qwertyuiop', 'asdfghjkl', 'iloveyou',
+  'teamo123', 'abc12345', 'abcd1234', '1q2w3e4r', 'aaaaaaaa', 'mexico123', 'cancun123', 'dondeviene', 'demo1234',
+  'admin123', 'administrador', 'welcome1', 'sunshine', 'princess', 'football', 'baseball', 'superman', 'pokemon1']);
+
+export function passwordProblem(pw) {
+  if (pw.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if (pw.length > 200) return 'La contraseña es demasiado larga.';
+  if (COMMON.has(pw.toLowerCase()) || /^(.)\1+$/.test(pw)) return 'Esa contraseña es muy común y fácil de adivinar. Elige otra.';
+  return null;
+}

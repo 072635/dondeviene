@@ -54,6 +54,7 @@ test('validaciones de registro', async () => {
   const c = client();
   assert.equal((await c('/auth/register', { method: 'POST', body: { name: 'X', email: 'malo', password: 'secreto123' } })).status, 400);
   assert.equal((await c('/auth/register', { method: 'POST', body: { name: 'X', email: 'x@test.mx', password: 'corta' } })).status, 400);
+  assert.equal((await c('/auth/register', { method: 'POST', body: { name: 'X', email: 'x@test.mx', password: '12345678' } })).status, 400);
 });
 
 test('contraseña incorrecta y límite de intentos', async () => {

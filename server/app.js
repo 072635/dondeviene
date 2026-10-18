@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   hashPassword, verifyPassword, createSession, destroySession, sessionCookie, clearCookie,
-  loadUser, requireRole, publicUser, makeLoginLimiter,
+  loadUser, requireRole, publicUser, makeLoginLimiter, makeRateLimit, passwordProblem,
 } from './auth.js';
 import { makeRoute, haversine } from '../public/js/geo.js';
 import { traceRoute as osrmTrace } from './routing.js';
@@ -39,6 +39,10 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     }
     next();
   });
+  // Límites por IP: generales para toda la API y más estrictos para crear cuentas, avisos y reportes.
+  app.use('/api', makeRateLimit({ max: 600 }));
+  app.use(['/api/auth/register', '/api/reports'], makeRateLimit({ max: 10, windowMs: 10 * 60e3 }));
+  app.use('/api/waiting', makeRateLimit({ max: 30 }));
   app.use(express.json({ limit: '200kb' }));
   app.use(loadUser(db));
 
@@ -84,7 +88,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     const phone = str(req.body.phone, 20) || null;
     if (!name) return res.status(400).json({ error: 'Escribe tu nombre.' });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Escribe un correo válido.' });
-    if (password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+    if (passwordProblem(password)) return res.status(400).json({ error: passwordProblem(password) });
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'Ya existe una cuenta con ese correo. Inicia sesión.' });
     const r = db.prepare('INSERT INTO users (name, email, phone, pass, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(name, email, phone, hashPassword(password), 'pasajero', Date.now());
@@ -122,7 +126,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
   app.post('/api/auth/password', requireRole(), (req, res) => {
     const current = String(req.body.current || ''), next = String(req.body.password || '');
     if (!verifyPassword(current, req.user.pass)) return res.status(400).json({ error: 'La contraseña actual no es correcta.' });
-    if (next.length < 8) return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 8 caracteres.' });
+    if (passwordProblem(next)) return res.status(400).json({ error: passwordProblem(next) });
     db.prepare('UPDATE users SET pass = ? WHERE id = ?').run(hashPassword(next), req.user.id);
     db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?').run(req.user.id, req.sessionToken);
     res.json({ ok: true });
@@ -381,7 +385,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     const role = req.body.role === 'admin' ? 'admin' : 'conductor';
     if (!name) return res.status(400).json({ error: 'Escribe el nombre.' });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Escribe un correo válido.' });
-    if (password.length < 8) return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+    if (passwordProblem(password)) return res.status(400).json({ error: passwordProblem(password) });
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'Ya existe una cuenta con ese correo.' });
     const unitId = req.body.unitId ? Number(req.body.unitId) : null;
     if (unitId && !unitById.get(unitId)) return res.status(400).json({ error: 'Esa unidad no existe.' });
@@ -399,8 +403,8 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
       unitId = req.body.unitId ? Number(req.body.unitId) : null;
       if (unitId && !unitById.get(unitId)) return res.status(400).json({ error: 'Esa unidad no existe.' });
     }
-    if (typeof req.body.password === 'string' && req.body.password.length < 8) {
-      return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+    if (typeof req.body.password === 'string' && passwordProblem(req.body.password)) {
+      return res.status(400).json({ error: passwordProblem(req.body.password) });
     }
     const active = req.body.active !== undefined ? (req.body.active ? 1 : 0) : user.active;
     db.prepare('UPDATE users SET unit_id = ?, active = ? WHERE id = ?').run(unitId, active, user.id);
