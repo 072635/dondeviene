@@ -42,6 +42,8 @@ Las unidades simuladas se apagan desde el Tablero, en la casilla "Unidades de de
 | `SIM` | `1` muestra unidades simuladas aunque `DEMO=0`; `0` las desactiva | igual que `DEMO` |
 | `SIM_SPEED` | Acelera el simulador (por ejemplo `10`) | `1` |
 | `NODE_ENV` | `production` marca la cookie de sesión como segura (HTTPS) | — |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Llaves de las notificaciones push. Si no se definen, se generan y se guardan en la base de datos | generadas |
+| `OSRM_URL` | Servicio para trazar rutas por las calles | servidor público de OSRM |
 
 **Para operar de verdad:** usa `DEMO=0`, una `ADMIN_PASSWORD` fuerte y HTTPS. Los celulares solo comparten la ubicación GPS con páginas que usan HTTPS.
 
@@ -85,7 +87,7 @@ Queda con su ícono en la pantalla de inicio y se abre a pantalla completa.
 
 ## Puesta en marcha con conductores reales
 
-1. Entra como administración, abre **Personal** y crea una cuenta para cada conductor con su unidad asignada.
+1. Los conductores se registran solos en **Crear cuenta → Chofer** (con su teléfono y el número de unidad). En **Personal → Choferes por aprobar**, confírmalo por teléfono y toca **Aprobar** con su unidad. También puedes crear la cuenta tú mismo en **Personal → Dar de alta**.
 2. **Grabar la ruta real:** un conductor hace una vuelta completa con la app. En **Ruta → Trazo desde un recorrido grabado**, elige su turno y toca **Usar como trazo**.
 3. En **Ruta → Paradas**, corrige los nombres y las coordenadas con las paradas oficiales.
 4. Apaga las unidades de demostración en el Tablero.
@@ -102,6 +104,16 @@ La carpeta `android/` y la carpeta `ios/` tienen la app nativa hecha con Capacit
 Los permisos ya están configurados: ubicación, servicio en primer plano de tipo ubicación y notificaciones en Android; `UIBackgroundModes: location` y los textos de permiso en iPhone.
 
 La app nativa inicia sesión con un token que se guarda en el teléfono; la web sigue usando una cookie que JavaScript no puede leer.
+
+## Notificaciones push
+
+El pasajero toca **Avísame cuando esté a 3 min** y el servidor vigila esa unidad: cuando le faltan 3 minutos o menos para llegar a su punto, le manda una notificación aunque tenga la app cerrada o el teléfono bloqueado.
+
+- **Android (Chrome, Edge, Firefox) y computadora:** funcionan directo desde la página.
+- **iPhone:** solo con iOS 16.4 o más nuevo y con la app agregada a la pantalla de inicio (Compartir → Agregar a inicio). Desde Safari normal el aviso solo funciona con la app abierta.
+- **App nativa (Play Store / App Store):** falta conectar Firebase Cloud Messaging; mientras tanto avisa con la app abierta.
+
+Las llaves VAPID identifican al servidor ante los servicios push. En el plan gratis de Render la base de datos se borra en cada despliegue, así que se generan llaves nuevas y los teléfonos se vuelven a suscribir solos la siguiente vez que piden un aviso. Para que sean fijas, genera unas con `npx web-push generate-vapid-keys` y ponlas en `VAPID_PUBLIC_KEY` y `VAPID_PRIVATE_KEY`.
 
 ## Limitación del GPS en la versión web
 

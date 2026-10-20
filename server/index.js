@@ -1,6 +1,7 @@
 import { openDb, seed } from './db.js';
 import { Live, Simulator } from './live.js';
 import { createApp } from './app.js';
+import { PushWatcher } from './push.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const DEMO = process.env.DEMO !== '0';
@@ -26,13 +27,14 @@ const simulator = new Simulator(live, { speed: Number(process.env.SIM_SPEED) || 
 // Unidades simuladas: activas en demo, o en producción con SIM=1 (para presentaciones; se apagan desde el Tablero).
 if (process.env.SIM === '1' || (DEMO && process.env.SIM !== '0')) simulator.start();
 
-const app = createApp({ db, live, simulator, demo: DEMO, secureCookies: process.env.NODE_ENV === 'production' });
+const push = new PushWatcher(db, live, { subject: `mailto:${ADMIN_EMAIL}` });
+const app = createApp({ db, live, simulator, push, demo: DEMO, secureCookies: process.env.NODE_ENV === 'production' });
 const server = app.listen(PORT, () => {
   console.log(`¿Dónde Viene? escuchando en http://localhost:${PORT}`);
   if (created.length) console.log('Cuentas creadas:', created.map((c) => `${c.email} (${c.role})`).join(', '));
   if (DEMO) console.log('Modo demo activo: hay cuentas de prueba y unidades simuladas. Usa DEMO=0 en producción.');
 });
 
-const shutdown = () => { live.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); };
+const shutdown = () => { live.close(); push.close(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

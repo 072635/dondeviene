@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que abra rápido y sin conexión. Los datos en vivo siempre vienen de la red.
-const CACHE = 'dondeviene-v6';
+const CACHE = 'dondeviene-v7';
 const SHELL = [
   '/', '/css/app.css', '/js/boot.js', '/js/app.js', '/js/ui.js', '/js/i18n.js', '/js/map.js', '/js/geo.js',
   '/js/passenger.js', '/js/driver.js', '/js/admin.js',
@@ -26,4 +26,27 @@ self.addEventListener('fetch', (e) => {
       return res;
     }).catch(() => caches.match(e.request).then((r) => r || caches.match('/'))),
   );
+});
+
+// Notificación push del servidor: "¡Ya viene tu camión!", aunque la app esté cerrada.
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch { /* aviso sin datos */ }
+  e.waitUntil(self.registration.showNotification(data.title || '¿Dónde Viene?', {
+    body: data.body || 'Tu camión está cerca.',
+    tag: data.tag || 'dv', renotify: true,
+    icon: '/icons/icon-192.png', badge: '/icons/icon-192.png',
+    vibrate: [200, 100, 200, 100, 300],
+    data: { url: data.url || '/' },
+  }));
+});
+
+// Al tocar la notificación se abre la app (o se trae al frente si ya estaba abierta).
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || '/', location.origin).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const open = list.find((c) => c.url.startsWith(location.origin));
+    return open ? open.focus() : self.clients.openWindow(url);
+  }));
 });

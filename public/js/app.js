@@ -26,7 +26,8 @@ function render() {
 }
 
 // ---------- Inicio de sesión y registro ----------
-function renderAuth(mode = 'login', message = '') {
+function renderAuth(mode = 'login', message = '', regRole = 'pasajero') {
+  const reg = mode === 'register', drv = reg && regRole === 'conductor';
   root.innerHTML = `
   <main class="auth">
     <div class="auth-box">
@@ -40,10 +41,14 @@ function renderAuth(mode = 'login', message = '') {
           <button type="button" role="tab" id="tLogin" aria-selected="${mode === 'login'}">${esc(t('login'))}</button>
           <button type="button" role="tab" id="tReg" aria-selected="${mode === 'register'}">${esc(t('register'))}</button>
         </div>
+        <div class="field" ${reg ? '' : 'hidden'}><span class="label">${esc(t('iAm'))}</span>
+          <div class="two" role="group"><button type="button" class="opt" id="rRider" aria-pressed="${!drv}">${esc(t('asRider'))}</button><button type="button" class="opt" id="rDriver" aria-pressed="${drv}">${esc(t('asDriver'))}</button></div></div>
         <div class="field" ${mode === 'login' ? 'hidden' : ''}><label class="label" for="fName">${esc(t('name'))}</label><input id="fName" autocomplete="name"></div>
         <div class="field"><label class="label" for="fEmail">${esc(t('email'))}</label><input id="fEmail" type="email" autocomplete="email" inputmode="email" required></div>
         <div class="field"><label class="label" for="fPass">${esc(t('password'))}</label><input id="fPass" type="password" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required minlength="8"></div>
-        <div class="field" ${mode === 'login' ? 'hidden' : ''}><label class="label" for="fPhone">${esc(t('phone'))}</label><input id="fPhone" type="tel" autocomplete="tel"></div>
+        <div class="field" ${mode === 'login' ? 'hidden' : ''}><label class="label" for="fPhone">${esc(drv ? t('phoneReq') : t('phone'))}</label><input id="fPhone" type="tel" autocomplete="tel" ${drv ? 'required' : ''}></div>
+        <div class="field" ${drv ? '' : 'hidden'}><label class="label" for="fUnit">${esc(t('unitAsk'))}</label><input id="fUnit" inputmode="numeric" maxlength="10" placeholder="07"></div>
+        ${drv ? `<p class="sub" style="margin:0">${esc(t('driverNote'))}</p>` : ''}
         <div class="error" id="authErr" role="alert" ${message ? '' : 'hidden'}>${esc(message)}</div>
         <button class="btn" id="authBtn" type="submit">${esc(mode === 'login' ? t('login') : t('register'))}</button>
         <div class="row-actions" style="justify-content:space-between;align-items:center">
@@ -58,8 +63,16 @@ function renderAuth(mode = 'login', message = '') {
   </main>`;
   $('#tLogin').onclick = () => renderAuth('login');
   $('#tReg').onclick = () => renderAuth('register');
-  $('#lEs').onclick = () => { setLang('es'); renderAuth(mode); };
-  $('#lEn').onclick = () => { setLang('en'); renderAuth(mode); };
+  // Cambiar entre pasajero y chofer conserva lo que ya se escribió.
+  const keep = (role) => {
+    const v = ['fName', 'fEmail', 'fPass', 'fPhone', 'fUnit'].map((id) => [id, $('#' + id).value]);
+    renderAuth('register', '', role);
+    for (const [id, val] of v) $('#' + id).value = val;
+  };
+  $('#rRider').onclick = () => keep('pasajero');
+  $('#rDriver').onclick = () => keep('conductor');
+  $('#lEs').onclick = () => { setLang('es'); renderAuth(mode, '', regRole); };
+  $('#lEn').onclick = () => { setLang('en'); renderAuth(mode, '', regRole); };
   $('#guestBtn').onclick = () => { state.guest = true; render(); };
   $('#authForm').onsubmit = async (e) => {
     e.preventDefault();
@@ -67,7 +80,7 @@ function renderAuth(mode = 'login', message = '') {
     btn.disabled = true; err.hidden = true;
     try {
       const body = { email: $('#fEmail').value, password: $('#fPass').value };
-      if (mode === 'register') Object.assign(body, { name: $('#fName').value, phone: $('#fPhone').value });
+      if (reg) Object.assign(body, { name: $('#fName').value, phone: $('#fPhone').value, role: regRole, unitNumber: drv ? $('#fUnit').value : undefined });
       const r = await api(mode === 'login' ? '/auth/login' : '/auth/register', { method: 'POST', body });
       if (r.token) setToken(r.token);
       state.user = r.user; state.guest = false;
@@ -139,7 +152,9 @@ function accountMenu() {
 }
 
 if ('serviceWorker' in navigator && !NATIVE && location.protocol !== 'file:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  // app.js se carga después del evento "load" (ver boot.js), así que se registra de inmediato si ya pasó.
+  const reg = () => navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if (document.readyState === 'complete') reg(); else window.addEventListener('load', reg);
 }
 
 boot();

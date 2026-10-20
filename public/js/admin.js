@@ -194,7 +194,18 @@ export async function mount(view) {
     if (tab !== 'people') return;
     const staff = users.filter((u) => u.role !== 'pasajero'), riders = users.filter((u) => u.role === 'pasajero');
     const unitOpts = (sel) => `<option value="">Sin unidad</option>${units.map((u) => `<option value="${u.id}" ${u.id === sel ? 'selected' : ''}>Unidad ${esc(u.number)}</option>`).join('')}`;
+    // Choferes que se registraron solos y esperan que se les asigne unidad.
+    const pending = staff.filter((u) => u.role === 'conductor' && !u.unit_id && u.active);
+    const askedId = (u) => units.find((x) => x.number === u.requested_unit)?.id ?? null;
     $('#aView').innerHTML = `
+      ${pending.length ? `<div class="card" style="border-color:var(--gold)"><h3 style="font-family:var(--font-display);font-size:21px">Choferes por aprobar (${pending.length})</h3>
+        <p class="sub" style="margin:0">Se registraron desde la app. Antes de aprobar, confirma por teléfono que de verdad manejan esa unidad.</p>
+        <div class="tbl"><table><thead><tr><th>Nombre</th><th>Teléfono</th><th>Correo</th><th>Pidió</th><th>Asignar unidad</th><th></th></tr></thead><tbody>
+        ${pending.map((u) => `<tr><td>${esc(u.name)}</td><td>${u.phone ? `<a href="tel:${esc(u.phone)}">${esc(u.phone)}</a>` : '—'}</td><td>${esc(u.email)}</td>
+          <td>${u.requested_unit ? `Unidad ${esc(u.requested_unit)}` : '—'}</td>
+          <td><select data-approve-unit="${u.id}" aria-label="Unidad para ${esc(u.name)}">${unitOpts(askedId(u))}</select></td>
+          <td class="row-actions"><button class="btn small" data-approve="${u.id}">Aprobar</button><button class="ghost" data-reject="${u.id}" style="padding:5px 10px">Rechazar</button></td></tr>`).join('')}
+        </tbody></table></div></div>` : ''}
       <div class="card"><h3 style="font-family:var(--font-display);font-size:21px">Conductores y administración</h3>
         <div class="tbl"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Unidad</th><th>Activo</th><th></th></tr></thead><tbody>
         ${staff.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${u.role === 'admin' ? 'Admin' : 'Conductor'}</td>
@@ -218,6 +229,13 @@ export async function mount(view) {
         <p class="sub" style="margin:0">${riders.length} cuentas</p></div>`;
     const patch = async (id, body, ok) => { try { await api(`/admin/users/${id}`, { method: 'PATCH', body }); toast(ok); } catch (e) { toast(e.message); renderPeople(); } };
     $$('[data-unit]').forEach((s) => s.onchange = () => patch(s.dataset.unit, { unitId: s.value ? Number(s.value) : null }, 'Unidad asignada.'));
+    $$('[data-approve]').forEach((b) => b.onclick = async () => {
+      const v = $(`[data-approve-unit="${b.dataset.approve}"]`).value;
+      if (!v) return toast('Elige la unidad que va a manejar.');
+      await patch(b.dataset.approve, { unitId: Number(v) }, 'Chofer aprobado. Ya puede iniciar turno.');
+      renderPeople();
+    });
+    $$('[data-reject]').forEach((b) => b.onclick = async () => { await patch(b.dataset.reject, { active: false }, 'Registro rechazado: la cuenta quedó desactivada.'); renderPeople(); });
     $$('[data-active]').forEach((c) => c.onchange = () => patch(c.dataset.active, { active: c.checked }, c.checked ? 'Cuenta activada.' : 'Cuenta desactivada.'));
     $$('[data-pw]').forEach((b) => b.onclick = () => {
       const m = modal(`<h2 style="font-family:var(--font-display);font-size:24px">Nueva contraseña</h2><p class="sub" style="margin:0">${esc(b.dataset.name)}</p>

@@ -1,4 +1,4 @@
-import { $, $$, api, esc, toast, fmtMin, adviceHTML, store } from './ui.js';
+import { $, $$, api, esc, toast, fmtMin, adviceHTML, store, NATIVE } from './ui.js';
 import { t } from './i18n.js';
 import { makeRoute, etaToPoint, nearestStop } from './geo.js';
 import { createMap, subscribe } from './map.js';
@@ -17,6 +17,29 @@ function waitId() {
     store('dv-wid', id);
   }
   return id;
+}
+
+// Notificaciones push del servidor (versión web). En iPhone solo funcionan con la app agregada a la pantalla de inicio.
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const STANDALONE = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => !NATIVE && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function keyBytes(b64) {
+  const s = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64.length % 4)) % 4));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+
+async function pushSubscription() {
+  const { pushKey } = await api('/config');
+  if (!pushKey) return null;
+  const reg = await Promise.race([navigator.serviceWorker.ready, new Promise((_, no) => setTimeout(() => no(new Error('sw')), 8000))]);
+  const key = keyBytes(pushKey);
+  let sub = await reg.pushManager.getSubscription();
+  // Si el servidor cambió sus llaves, la suscripción vieja ya no sirve.
+  const old = sub?.options?.applicationServerKey && new Uint8Array(sub.options.applicationServerKey);
+  if (sub && old && (old.length !== key.length || old.some((b, i) => b !== key[i]))) { await sub.unsubscribe(); sub = null; }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  return sub.toJSON();
 }
 
 export async function mount(view, { user }) {
@@ -118,7 +141,7 @@ export async function mount(view, { user }) {
 
   function setMode(mode) {
     st.mode = mode; store('dv-mode', mode);
-    st.notify = null;
+    clearNotify();
     if (mode === 'gps') startGps(); else stopGps();
     renderPlace(); renderNext(); if (st.wait.on) sendWaiting();
   }
@@ -170,14 +193,14 @@ export async function mount(view, { user }) {
   function selectStop(k) {
     st.stop = k; store('dv-stop', String(k));
     $('#pStop').value = k;
-    st.notify = null;
+    clearNotify();
     renderPlace(); renderNext();
     if (st.wait.on) sendWaiting();
   }
 
   function setDir(dir) {
     st.dir = dir; store('dv-dir', String(dir));
-    st.notify = null;
+    clearNotify();
     renderPlace(); renderNext();
     if (st.wait.on) sendWaiting();
   }
@@ -235,16 +258,35 @@ export async function mount(view, { user }) {
     renderWait();
   }
 
+  function clearNotify() {
+    if (st.notify?.push) api('/push/cancel', { method: 'POST', body: { id: waitId() } }).catch(() => {});
+    st.notify = null;
+  }
+
   async function toggleNotify() {
-    if (st.notify) { st.notify = null; renderNext(); return; }
+    if (st.notify) { clearNotify(); renderNext(); return; }
     const list = etas() || [];
     const c = list.find((x) => x.eta > 180) || list[0];
-    if (!c) return;
-    st.notify = { id: c.u.id, number: c.u.number };
+    const tg = target();
+    if (!c || !tg) return;
+    st.notify = { id: c.u.id, number: c.u.number, push: false };
+    renderNext();
     if ('Notification' in window && Notification.permission === 'default') {
       try { await Notification.requestPermission(); } catch { /* el navegador no lo permite */ }
     }
-    renderNext();
+    if (pushSupported() && Notification.permission === 'granted') {
+      try {
+        const subscription = await pushSubscription();
+        if (subscription && st.notify?.id === c.u.id) {
+          await api('/push/watch', { method: 'POST', body: {
+            id: waitId(), subscription, routeId: st.route.id, d: tg.d, dir: effectiveDir(tg.d), unitId: c.u.id, minutes: 3, label: tg.label,
+          } });
+          st.notify.push = true;
+          toast(t('pushOn'));
+        }
+      } catch { /* sin push: el aviso sigue funcionando con la app abierta */ }
+    } else if (IOS && !STANDALONE && !NATIVE) toast(t('pushIos'), 15000);
+    else if ('Notification' in window && Notification.permission === 'denied') toast(t('pushDenied'));
   }
 
   function checkNotify(list) {
@@ -253,9 +295,10 @@ export async function mount(view, { user }) {
     if (!x) return;
     if (x.eta <= 180) {
       const msg = t('notifyMsg', { u: st.notify.number, s: target()?.label || '' });
-      st.notify = null;
+      const viaPush = st.notify.push;
+      st.notify = null; // si era push, el servidor manda la notificación
       toast(msg, 15000);
-      if ('Notification' in window && Notification.permission === 'granted') {
+      if (!viaPush && 'Notification' in window && Notification.permission === 'granted') {
         try { new Notification('¿Dónde Viene?', { body: msg, icon: '/icons/icon-192.png' }); } catch { /* algunos navegadores solo permiten avisos desde el service worker */ }
       }
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);

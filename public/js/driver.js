@@ -6,7 +6,7 @@ const SEND_EVERY_MS = 5000;
 export async function mount(view) {
   const me = await api('/driver/me');
   if (!me.unit) {
-    view.innerHTML = `<div class="page"><div class="card"><b>Tu cuenta aún no tiene unidad asignada.</b><span class="sub">Pide a la administración que te asigne tu unidad. Después vuelve a entrar.</span></div></div>`;
+    view.innerHTML = `<div class="page"><div class="card"><b>Tu cuenta de chofer está en revisión.</b><span class="sub">La administración confirmará tus datos y te asignará tu unidad${me.requestedUnit ? ` (pediste la ${esc(me.requestedUnit)})` : ''}. Cuando lo haga, cierra sesión y vuelve a entrar para iniciar tu turno.</span></div></div>`;
     return () => {};
   }
 

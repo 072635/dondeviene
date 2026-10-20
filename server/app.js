@@ -6,6 +6,7 @@ import {
   loadUser, requireRole, publicUser, makeLoginLimiter, makeRateLimit, passwordProblem,
 } from './auth.js';
 import { makeRoute, haversine } from '../public/js/geo.js';
+import { validSubscription } from './push.js';
 import { traceRoute as osrmTrace } from './routing.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,7 +20,7 @@ const str = (v, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const startOfDay = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
-export function createApp({ db, live, secureCookies = false, simulator = null, demo = false, traceRoute = osrmTrace }) {
+export function createApp({ db, live, secureCookies = false, simulator = null, demo = false, traceRoute = osrmTrace, push = null, signupLimit = 10 }) {
   const app = express();
   const limiter = makeLoginLimiter();
   app.disable('x-powered-by');
@@ -41,8 +42,9 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
   });
   // Límites por IP: generales para toda la API y más estrictos para crear cuentas, avisos y reportes.
   app.use('/api', makeRateLimit({ max: 600 }));
-  app.use(['/api/auth/register', '/api/reports'], makeRateLimit({ max: 10, windowMs: 10 * 60e3 }));
+  app.use(['/api/auth/register', '/api/reports'], makeRateLimit({ max: signupLimit, windowMs: 10 * 60e3 }));
   app.use('/api/waiting', makeRateLimit({ max: 30 }));
+  app.use('/api/push', makeRateLimit({ max: 30 }));
   app.use(express.json({ limit: '200kb' }));
   app.use(loadUser(db));
 
@@ -86,12 +88,22 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
   app.post('/api/auth/register', (req, res) => {
     const name = str(req.body.name, 80), email = str(req.body.email, 120).toLowerCase(), password = String(req.body.password || '');
     const phone = str(req.body.phone, 20) || null;
+    // Un chofer que se registra queda en revisión: no puede compartir ubicación hasta que la administración le asigne su unidad.
+    const driver = req.body.role === 'conductor';
+    const unitAsked = driver ? str(req.body.unitNumber, 10) || null : null;
     if (!name) return res.status(400).json({ error: 'Escribe tu nombre.' });
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Escribe un correo válido.' });
     if (passwordProblem(password)) return res.status(400).json({ error: passwordProblem(password) });
+    if (driver && !/^[0-9+()\s-]{8,20}$/.test(phone || '')) return res.status(400).json({ error: 'Escribe tu teléfono para que la administración pueda contactarte.' });
     if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'Ya existe una cuenta con ese correo. Inicia sesión.' });
-    const r = db.prepare('INSERT INTO users (name, email, phone, pass, role, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(name, email, phone, hashPassword(password), 'pasajero', Date.now());
+    const r = db.prepare('INSERT INTO users (name, email, phone, pass, role, requested_unit, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(name, email, phone, hashPassword(password), driver ? 'conductor' : 'pasajero', unitAsked, Date.now());
+    if (driver) {
+      const asked = unitAsked && db.prepare('SELECT route_id FROM units WHERE number = ?').get(unitAsked);
+      const routeId = asked?.route_id ?? db.prepare('SELECT id FROM routes ORDER BY id LIMIT 1').get()?.id;
+      logEvent({ routeId, kind: 'registro', level: 'warn',
+        text: `Nuevo chofer por aprobar: ${name}${unitAsked ? ` (dice manejar la unidad ${unitAsked})` : ''}. Asígnale su unidad en Personal.` });
+    }
     return login(req, res.status(201), userById.get(r.lastInsertRowid));
   });
 
@@ -120,7 +132,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
   });
 
   app.get('/api/config', (_req, res) => {
-    res.json({ demo: !!demo });
+    res.json({ demo: !!demo, pushKey: push?.publicKey || null });
   });
 
   app.post('/api/auth/password', requireRole(), (req, res) => {
@@ -175,6 +187,29 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     res.json({ ok: true });
   });
 
+  // ---------- Notificaciones push (anónimas) ----------
+  app.post('/api/push/watch', (req, res) => {
+    if (!push) return res.status(503).json({ error: 'Las notificaciones no están disponibles.' });
+    const id = String(req.body.id || '');
+    if (!WAIT_ID.test(id)) return res.status(400).json({ error: 'Identificador inválido.' });
+    const sub = validSubscription(req.body.subscription);
+    if (!sub) return res.status(400).json({ error: 'Este navegador no permite notificaciones.' });
+    const r = live.route(req.body.routeId);
+    const d = num(req.body.d);
+    if (!r || d === null || d < 0 || d > r.geo.L) return res.status(400).json({ error: 'Punto inválido.' });
+    const minutes = Math.min(15, Math.max(1, Math.round(num(req.body.minutes) ?? 3)));
+    const ok = push.watch(id, { sub, routeId: r.id, d, dir: req.body.dir === 1 ? 1 : 0, minutes,
+      unitId: Number(req.body.unitId) || null, label: str(req.body.label, 60) || 'tu parada' });
+    if (!ok) return res.status(503).json({ error: 'Hay muchos avisos pendientes. Inténtalo en un momento.' });
+    res.json({ ok: true, minutes });
+  });
+
+  app.post('/api/push/cancel', (req, res) => {
+    const id = String(req.body.id || '');
+    if (WAIT_ID.test(id)) push?.cancel(id);
+    res.json({ ok: true });
+  });
+
   // ---------- Reportes ciudadanos ----------
   app.post('/api/reports', requireRole(), (req, res) => {
     const reason = str(req.body.reason, 40);
@@ -201,6 +236,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
     const route = unit ? live.route(unit.route_id) : null;
     res.json({
       unit: unit && { id: unit.id, number: unit.number, accessible: !!unit.accessible, plate: unit.plate },
+      requestedUnit: req.user.requested_unit || null,
       route: route && live.publicRoute(route),
       shift: shift && { id: shift.id, startedAt: shift.started_at },
       status: shift && unit ? live.driverStatus(unit.id) : null,
@@ -375,7 +411,7 @@ export function createApp({ db, live, secureCookies = false, simulator = null, d
 
   admin.get('/users', (req, res) => {
     const role = ['pasajero', 'conductor', 'admin'].includes(req.query.role) ? req.query.role : null;
-    const rows = db.prepare(`SELECT u.id, u.name, u.email, u.phone, u.role, u.unit_id, u.active, u.created_at, un.number unit_number
+    const rows = db.prepare(`SELECT u.id, u.name, u.email, u.phone, u.role, u.unit_id, u.requested_unit, u.active, u.created_at, un.number unit_number
       FROM users u LEFT JOIN units un ON un.id = u.unit_id ${role ? 'WHERE u.role = ?' : ''} ORDER BY u.role, u.name`).all(...(role ? [role] : []));
     res.json({ users: rows });
   });

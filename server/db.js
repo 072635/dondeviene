@@ -93,6 +93,9 @@ export function openDb(file = process.env.DB_FILE || path.join(process.cwd(), 'd
       resolved_at INTEGER
     );
   `);
+  // Columnas agregadas después de la primera versión.
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!userCols.includes('requested_unit')) db.exec('ALTER TABLE users ADD COLUMN requested_unit TEXT');
   return db;
 }
 

@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { openDb, seed } from '../server/db.js';
 import { Live, Simulator } from '../server/live.js';
 import { createApp } from '../server/app.js';
+import { PushWatcher } from '../server/push.js';
 import { makeRoute, etaTo, etaToPoint, gapsFor } from '../public/js/geo.js';
 import { SEED_ROUTE } from '../server/seed-data.js';
 
-let server, base, live;
+let server, base, live, push;
+const pushed = [];
 
 before(async () => {
   const db = openDb(':memory:');
@@ -15,12 +17,13 @@ before(async () => {
   const simulator = new Simulator(live);
   // Servicio de rutas simulado: une los puntos en línea recta (las pruebas no dependen de internet).
   const traceRoute = async (w) => ({ path: w, km: +(makeRoute(w).L / 1000).toFixed(2), uturns: [] });
-  const app = createApp({ db, live, simulator, demo: true, traceRoute });
+  push = new PushWatcher(db, live, { send: async (sub, payload) => { pushed.push({ sub, payload }); } });
+  const app = createApp({ db, live, simulator, demo: true, traceRoute, push, signupLimit: 1000 });
   await new Promise((r) => { server = app.listen(0, r); });
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-after(() => { live.close(); server.close(); });
+after(() => { live.close(); push.close(); server.close(); });
 
 // Cliente con cookie propia, como un navegador.
 function client() {
@@ -278,4 +281,55 @@ test('administración: crear una ruta nueva, agregar paradas y asignarle una uni
   const routes = (await client()('/routes')).data.routes;
   assert.ok(routes.find((x) => x.id === id).units.some((u) => u.number === '40'));
   assert.equal((await a(`/admin/units/${u40.id}`, { method: 'PATCH', body: { routeId: 999 } })).status, 400);
+});
+
+test('un chofer se registra solo y queda en revisión hasta que le asignan unidad', async () => {
+  const c = client();
+  const base = { name: 'Chofer Nuevo', email: 'nuevo@test.mx', password: 'secreto123', role: 'conductor', unitNumber: '15' };
+  assert.equal((await c('/auth/register', { method: 'POST', body: base })).status, 400); // sin teléfono
+  const r = await c('/auth/register', { method: 'POST', body: { ...base, phone: '998 123 4567' } });
+  assert.equal(r.status, 201);
+  assert.equal(r.data.user.role, 'conductor');
+  const me = (await c('/driver/me')).data;
+  assert.equal(me.unit, null);
+  assert.equal(me.requestedUnit, '15');
+  assert.notEqual((await c('/driver/shift/start', { method: 'POST', body: {} })).status, 200);
+  // Nadie puede registrarse como administrador.
+  const x = await client()('/auth/register', { method: 'POST', body: { name: 'X', email: 'x2@test.mx', password: 'secreto123', role: 'admin' } });
+  assert.equal(x.data.user.role, 'pasajero');
+
+  const a = client();
+  await a('/auth/login', { method: 'POST', body: { email: 'admin@test.mx', password: 'admin-secreto' } });
+  const u = (await a('/admin/users')).data.users.find((y) => y.email === 'nuevo@test.mx');
+  assert.equal(u.requested_unit, '15');
+  assert.ok((await a('/admin/events')).data.events.some((e) => e.kind === 'registro'));
+});
+
+test('notificación push cuando la unidad está a 3 minutos', async () => {
+  const c = client();
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc123', keys: { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) } };
+  const r = live.route(1);
+  const body = { id: 'telefono-de-prueba-01', subscription: sub, routeId: 1, d: 9000, dir: 0, minutes: 3, label: 'Punta Cancún' };
+  assert.ok((await c('/config')).data.pushKey);
+  // Solo se aceptan servicios push reales (el servidor no manda peticiones a cualquier dirección).
+  assert.equal((await c('/push/watch', { method: 'POST', body: { ...body, subscription: { ...sub, endpoint: 'https://ejemplo.com/x' } } })).status, 400);
+  assert.equal((await c('/push/watch', { method: 'POST', body })).status, 200);
+
+  // Una unidad a 5 km: todavía no avisa. A 1 km (unos 2.6 min): avisa una sola vez.
+  const unit = { unitId: 9001, number: '99', routeId: 1, hasFix: true, offRoute: false, ts: Date.now(), s: 4000 };
+  live.units.set(9001, unit);
+  push.check();
+  assert.equal(pushed.length, 0);
+  unit.s = 8000; unit.ts = Date.now();
+  push.check(); push.check();
+  live.units.delete(9001);
+  assert.equal(pushed.length, 1);
+  assert.equal(pushed[0].sub.endpoint, sub.endpoint);
+  assert.match(pushed[0].payload.body, /Unidad 99 llega en ~3 min a Punta Cancún/);
+
+  // Cancelar quita el aviso pendiente.
+  await c('/push/watch', { method: 'POST', body });
+  await c('/push/cancel', { method: 'POST', body: { id: body.id } });
+  assert.equal(push.watches.size, 0);
+  assert.ok(r);
 });
