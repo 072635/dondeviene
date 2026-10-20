@@ -21,67 +21,94 @@ async function boot() {
 function render() {
   cleanup?.();
   cleanup = null;
-  if (!state.user && !state.guest) return renderAuth();
+  if (!state.user && !state.guest) return renderWelcome();
   renderShell();
 }
 
-// ---------- Inicio de sesión y registro ----------
-function renderAuth(mode = 'login', message = '', regRole = 'pasajero') {
-  const reg = mode === 'register', drv = reg && regRole === 'conductor';
+// ---------- Bienvenida: pasajero, chofer o ver sin cuenta ----------
+const ICONS = {
+  pasajero: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg>',
+  conductor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="3"/><path d="M3 11h18M7 20v-3M17 20v-3"/><circle cx="7.5" cy="14" r="1"/><circle cx="16.5" cy="14" r="1"/></svg>',
+  guest: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+};
+
+const brandHTML = () => `
+  <div class="auth-brand">
+    <img src="/icons/icon-192.png" alt="" width="96" height="96">
+    <h1><span>¿</span>Dónde Viene<span>?</span></h1>
+    <p>${esc(t('tagline'))}</p>
+  </div>`;
+
+function renderWelcome() {
   root.innerHTML = `
   <main class="auth">
     <div class="auth-box">
-      <div class="auth-brand">
-        <img src="/icons/icon-192.png" alt="" width="96" height="96">
-        <h1><span>¿</span>Dónde Viene<span>?</span></h1>
-        <p>${esc(t('tagline'))}</p>
+      ${brandHTML()}
+      <div class="who">
+        <button type="button" class="who-opt" id="wRider">${ICONS.pasajero}<span><b>${esc(t('whoRider'))}</b><small>${esc(t('whoRiderB'))}</small></span></button>
+        <button type="button" class="who-opt" id="wDriver">${ICONS.conductor}<span><b>${esc(t('whoDriver'))}</b><small>${esc(t('whoDriverB'))}</small></span></button>
+        <button type="button" class="who-opt guest-opt" id="wGuest">${ICONS.guest}<span><b>${esc(t('whoGuest'))}</b><small>${esc(t('whoGuestB'))}</small></span></button>
       </div>
-      <form class="card" id="authForm" novalidate>
-        <div class="auth-tabs" role="tablist">
-          <button type="button" role="tab" id="tLogin" aria-selected="${mode === 'login'}">${esc(t('login'))}</button>
-          <button type="button" role="tab" id="tReg" aria-selected="${mode === 'register'}">${esc(t('register'))}</button>
-        </div>
-        <div class="field" ${reg ? '' : 'hidden'}><span class="label">${esc(t('iAm'))}</span>
-          <div class="two" role="group"><button type="button" class="opt" id="rRider" aria-pressed="${!drv}">${esc(t('asRider'))}</button><button type="button" class="opt" id="rDriver" aria-pressed="${drv}">${esc(t('asDriver'))}</button></div></div>
-        <div class="field" ${mode === 'login' ? 'hidden' : ''}><label class="label" for="fName">${esc(t('name'))}</label><input id="fName" autocomplete="name"></div>
-        <div class="field"><label class="label" for="fEmail">${esc(t('email'))}</label><input id="fEmail" type="email" autocomplete="email" inputmode="email" required></div>
-        <div class="field"><label class="label" for="fPass">${esc(t('password'))}</label><input id="fPass" type="password" autocomplete="${mode === 'login' ? 'current-password' : 'new-password'}" required minlength="8"></div>
-        <div class="field" ${mode === 'login' ? 'hidden' : ''}><label class="label" for="fPhone">${esc(drv ? t('phoneReq') : t('phone'))}</label><input id="fPhone" type="tel" autocomplete="tel" ${drv ? 'required' : ''}></div>
-        <div class="field" ${drv ? '' : 'hidden'}><label class="label" for="fUnit">${esc(t('unitAsk'))}</label><input id="fUnit" inputmode="numeric" maxlength="10" placeholder="07"></div>
-        ${drv ? `<p class="sub" style="margin:0">${esc(t('driverNote'))}</p>` : ''}
-        <div class="error" id="authErr" role="alert" ${message ? '' : 'hidden'}>${esc(message)}</div>
-        <button class="btn" id="authBtn" type="submit">${esc(mode === 'login' ? t('login') : t('register'))}</button>
-        <div class="row-actions" style="justify-content:space-between;align-items:center">
-          <span class="sub">Idioma</span>
-          <div class="row-actions"><button type="button" class="ghost" id="lEs" aria-pressed="${getLang() === 'es'}">ES</button><button type="button" class="ghost" id="lEn" aria-pressed="${getLang() === 'en'}">EN</button></div>
-        </div>
-      </form>
-      <div class="guest">${esc(t('guest'))} <button class="link" id="guestBtn">${esc(t('guestBtn'))}</button></div>
       ${/Android/i.test(navigator.userAgent) && !NATIVE ? `<div class="guest"><a href="/descargas/dondeviene.apk" style="color:var(--gold-light);font-weight:700">Descargar la app para Android</a></div>` : ''}
+      <div class="welcome-foot">
+        <button type="button" class="link" id="wAdmin">${esc(t('adminLink'))}</button>
+        <span><button type="button" class="link" id="lEs" aria-pressed="${getLang() === 'es'}">ES</button> · <button type="button" class="link" id="lEn" aria-pressed="${getLang() === 'en'}">EN</button></span>
+      </div>
       ${state.config.demo ? `<div class="demo-accounts">Cuentas de prueba (contraseña demo1234): pasajero@demo.mx · conductor07@demo.mx · admin@dondeviene.mx (admin1234)</div>` : ''}
     </div>
   </main>`;
-  $('#tLogin').onclick = () => renderAuth('login');
-  $('#tReg').onclick = () => renderAuth('register');
-  // Cambiar entre pasajero y chofer conserva lo que ya se escribió.
-  const keep = (role) => {
-    const v = ['fName', 'fEmail', 'fPass', 'fPhone', 'fUnit'].map((id) => [id, $('#' + id).value]);
-    renderAuth('register', '', role);
-    for (const [id, val] of v) $('#' + id).value = val;
+  $('#wRider').onclick = () => renderAuth('pasajero', 'register');
+  $('#wDriver').onclick = () => renderAuth('conductor', 'register');
+  $('#wGuest').onclick = () => { state.guest = true; render(); };
+  $('#wAdmin').onclick = () => renderAuth('admin', 'login');
+  $('#lEs').onclick = () => { setLang('es'); renderWelcome(); };
+  $('#lEn').onclick = () => { setLang('en'); renderWelcome(); };
+}
+
+// ---------- Registro y entrada (uno para pasajeros, otro para choferes) ----------
+function renderAuth(who, mode = 'register', message = '') {
+  const reg = mode === 'register' && who !== 'admin', drv = who === 'conductor';
+  const title = { pasajero: t('ridersT'), conductor: t('driversT'), admin: t('adminT') }[who];
+  root.innerHTML = `
+  <main class="auth">
+    <div class="auth-box">
+      ${brandHTML()}
+      <form class="card" id="authForm" novalidate>
+        <div class="auth-head"><button type="button" class="link" id="aBack">← ${esc(t('back'))}</button><b>${esc(title)}</b></div>
+        ${who !== 'admin' ? `<div class="auth-tabs" role="tablist">
+          <button type="button" role="tab" id="tReg" aria-selected="${reg}">${esc(t('register'))}</button>
+          <button type="button" role="tab" id="tLogin" aria-selected="${!reg}">${esc(t('haveAccount'))}</button>
+        </div>` : ''}
+        <div class="field" ${reg ? '' : 'hidden'}><label class="label" for="fName">${esc(t('name'))}</label><input id="fName" autocomplete="name"></div>
+        <div class="field"><label class="label" for="fEmail">${esc(t('email'))}</label><input id="fEmail" type="email" autocomplete="email" inputmode="email" required></div>
+        <div class="field"><label class="label" for="fPass">${esc(t('password'))}</label><input id="fPass" type="password" autocomplete="${reg ? 'new-password' : 'current-password'}" required minlength="8"></div>
+        <div class="field" ${reg ? '' : 'hidden'}><label class="label" for="fPhone">${esc(drv ? t('phoneReq') : t('phone'))}</label><input id="fPhone" type="tel" autocomplete="tel" ${drv ? 'required' : ''}></div>
+        <div class="field" ${reg && drv ? '' : 'hidden'}><label class="label" for="fUnit">${esc(t('unitAsk'))}</label><input id="fUnit" inputmode="numeric" maxlength="10" placeholder="07"></div>
+        ${reg && drv ? `<p class="sub" style="margin:0">${esc(t('driverNote'))}</p>` : ''}
+        <div class="error" id="authErr" role="alert" ${message ? '' : 'hidden'}>${esc(message)}</div>
+        <button class="btn" id="authBtn" type="submit">${esc(reg ? (drv ? t('registerDriver') : t('register')) : t('login'))}</button>
+      </form>
+      ${who === 'pasajero' ? `<div class="guest">${esc(t('guest'))} <button class="link" id="guestBtn">${esc(t('guestBtn'))}</button></div>` : ''}
+    </div>
+  </main>`;
+  // Cambiar de pestaña conserva el correo y la contraseña ya escritos.
+  const go = (m) => {
+    const email = $('#fEmail').value, pass = $('#fPass').value;
+    renderAuth(who, m);
+    $('#fEmail').value = email; $('#fPass').value = pass;
   };
-  $('#rRider').onclick = () => keep('pasajero');
-  $('#rDriver').onclick = () => keep('conductor');
-  $('#lEs').onclick = () => { setLang('es'); renderAuth(mode, '', regRole); };
-  $('#lEn').onclick = () => { setLang('en'); renderAuth(mode, '', regRole); };
-  $('#guestBtn').onclick = () => { state.guest = true; render(); };
+  $('#aBack').onclick = renderWelcome;
+  $('#tReg')?.addEventListener('click', () => go('register'));
+  $('#tLogin')?.addEventListener('click', () => go('login'));
+  $('#guestBtn')?.addEventListener('click', () => { state.guest = true; render(); });
   $('#authForm').onsubmit = async (e) => {
     e.preventDefault();
     const btn = $('#authBtn'), err = $('#authErr');
     btn.disabled = true; err.hidden = true;
     try {
       const body = { email: $('#fEmail').value, password: $('#fPass').value };
-      if (reg) Object.assign(body, { name: $('#fName').value, phone: $('#fPhone').value, role: regRole, unitNumber: drv ? $('#fUnit').value : undefined });
-      const r = await api(mode === 'login' ? '/auth/login' : '/auth/register', { method: 'POST', body });
+      if (reg) Object.assign(body, { name: $('#fName').value, phone: $('#fPhone').value, role: drv ? 'conductor' : 'pasajero', unitNumber: drv ? $('#fUnit').value : undefined });
+      const r = await api(reg ? '/auth/register' : '/auth/login', { method: 'POST', body });
       if (r.token) setToken(r.token);
       state.user = r.user; state.guest = false;
       render();
@@ -89,6 +116,7 @@ function renderAuth(mode = 'login', message = '', regRole = 'pasajero') {
       err.textContent = ex.message; err.hidden = false; btn.disabled = false;
     }
   };
+  $(reg ? '#fName' : '#fEmail').focus();
 }
 
 // ---------- Estructura principal ----------

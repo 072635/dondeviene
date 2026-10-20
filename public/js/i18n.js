@@ -5,6 +5,11 @@ const T = {
   es: {
     tagline: 'Tu camión, en tiempo real.', login: 'Entrar', register: 'Crear cuenta', email: 'Correo', password: 'Contraseña',
     name: 'Nombre', phone: 'Teléfono (opcional)', phoneReq: 'Teléfono', iAm: 'Me registro como', asRider: 'Pasajero', asDriver: 'Chofer',
+    whoRider: 'Soy pasajero', whoRiderB: 'Crea tu cuenta para recibir avisos y reportar problemas.',
+    whoDriver: 'Soy chofer', whoDriverB: 'Regístrate con tu número de unidad o entra a tu turno.',
+    whoGuest: 'Ver sin cuenta', whoGuestB: 'Mira dónde viene tu camión ahora mismo.',
+    adminLink: 'Acceso para administración', back: 'Volver', ridersT: 'Pasajeros', driversT: 'Choferes', adminT: 'Administración',
+    haveAccount: 'Ya tengo cuenta', registerDriver: 'Registrarme como chofer',
     unitAsk: 'Número de unidad que manejas', driverNote: 'Tu cuenta de chofer queda en revisión: la administración confirma tus datos y te asigna tu unidad antes de que puedas iniciar turno.', guest: 'Solo quiero ver dónde viene', guestBtn: 'Continuar sin cuenta',
     logout: 'Salir', account: 'Mi cuenta',
     whereAt: '¿En qué parada estás?', whereTo: '¿Hacia dónde vas?', toB: '→ {b}', toA: '← {a}',
@@ -37,6 +42,11 @@ const T = {
   en: {
     tagline: 'Your bus, in real time.', login: 'Sign in', register: 'Create account', email: 'Email', password: 'Password',
     name: 'Name', phone: 'Phone (optional)', phoneReq: 'Phone', iAm: 'I am signing up as', asRider: 'Passenger', asDriver: 'Driver',
+    whoRider: 'I am a passenger', whoRiderB: 'Create an account to get alerts and report problems.',
+    whoDriver: 'I am a driver', whoDriverB: 'Sign up with your bus number or start your shift.',
+    whoGuest: 'Just look', whoGuestB: 'See where your bus is right now.',
+    adminLink: 'Administration access', back: 'Back', ridersT: 'Passengers', driversT: 'Drivers', adminT: 'Administration',
+    haveAccount: 'I have an account', registerDriver: 'Sign up as a driver',
     unitAsk: 'Bus number you drive', driverNote: 'Driver accounts are reviewed: the administration confirms your details and assigns your bus before you can start a shift.', guest: 'Just want to see where the bus is?', guestBtn: 'Continue without an account',
     logout: 'Sign out', account: 'My account',
     whereAt: 'Which stop are you at?', whereTo: 'Where are you going?', toB: '→ {b}', toA: '← {a}',

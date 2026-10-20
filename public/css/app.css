@@ -87,6 +87,20 @@ textarea{min-height:70px;resize:vertical}
 .auth-tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .guest{color:#FFFFFF;text-align:center}
 .guest button{color:var(--gold-light)}
+.who{display:flex;flex-direction:column;gap:10px}
+.who-opt{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:16px;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.18);font:inherit}
+.who-opt:hover,.who-opt:focus-visible{border-color:var(--gold);outline:none}
+.who-opt svg{flex:none;width:44px;height:44px;padding:9px;border-radius:12px;background:var(--accent-soft);stroke:var(--accent);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.who-opt b{display:block;font-family:var(--font-display);font-size:22px;line-height:1.1}
+.who-opt small{display:block;color:var(--muted);font-size:13.5px;margin-top:3px}
+.who-opt.guest-opt{background:transparent;color:#FFFFFF;border-color:rgba(255,255,255,.35);box-shadow:none}
+.who-opt.guest-opt small{color:rgba(255,255,255,.8)}
+.who-opt.guest-opt svg{background:rgba(255,255,255,.12);stroke:var(--gold-light)}
+.welcome-foot{display:flex;justify-content:space-between;align-items:center;color:#FFFFFF;font-size:14px}
+.welcome-foot .link{color:rgba(255,255,255,.85)}
+.welcome-foot .link[aria-pressed="true"]{color:var(--gold-light);font-weight:700}
+.auth-head{display:flex;justify-content:space-between;align-items:center}
+.auth-head b{font-family:var(--font-display);font-size:22px}
 .demo-accounts{color:#F1DEB9;font-size:12.5px;text-align:center}
 
 /* Pasajero */
